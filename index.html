@@ -181,6 +181,7 @@ button[aria-pressed="true"]{border-color:var(--accent);color:var(--hot)}
         <button id="hapBtn" aria-pressed="true">Haptics on</button>
         <button id="sndBtn" aria-pressed="true">Buzz sound on</button>
         <button id="flashBtn" aria-pressed="true">End: 1 white flash</button>
+        <button id="fallBtn" aria-pressed="true">Release falloff on</button>
       </div>
     </div>
     <div class="field">
@@ -213,10 +214,10 @@ const DATA = {"begin":[[210,215,214,37,38,37,0.149],[211,216,215,42,43,42,0.17],
 const F = 1000/24;
 DATA.end1 = DATA.end.slice(0,18).concat(DATA.end.slice(35)); // second white flash (f18-f34) removed
 const OFF = {c:[204,208,210], e:[0,0,0], a:0};
-const P = {debounce:40, shortMax:300, animStart:300, commit:1000, gap:50, saveAfter:500, lockout:0, buzzGap:40};
+const P = {debounce:40, shortMax:300, animStart:300, commit:1000, gap:50, saveAfter:500, lockout:0, buzzGap:40, falloff:180};
 const PDEF = [
   ["debounce","Debounce"],["shortMax","Short press max"],["animStart","Long-press LED starts"],
-  ["commit","Long-press commit"],["gap","Ramp kill before buzz"],["saveAfter","Save time after stop (S)"],["lockout","Highlight lockout after start"],["buzzGap","Stop double-buzz gap"]
+  ["commit","Long-press commit"],["gap","Ramp kill before buzz"],["saveAfter","Save time after stop (S)"],["lockout","Highlight lockout after start"],["buzzGap","Stop double-buzz gap"],["falloff","Early-release falloff"]
 ];
 const $ = id => document.getElementById(id);
 
@@ -262,7 +263,7 @@ function makeFade(t0,from,dur=167){ // back to base layer
 
 /* ---------- simulator state ---------- */
 const S = {state:"standby", saving:false, baseMode:"off", pulseT0:0, overlay:null, cur:OFF,
-  recStart:0, hl:0, endFlashes:1, bat:"batWhite", haptics:true, sound:true,
+  recStart:0, hl:0, endFlashes:1, fall:true, bat:"batWhite", haptics:true, sound:true,
   press:null, sched:[], presses:[], led:[], hap:[], hw:[], log:[], lastPress:null};
 
 function baseAt(t){
@@ -285,11 +286,13 @@ function schedule(at,fn,tag){ S.sched.push({at,fn,tag}); S.sched.sort((a,b)=>a.a
 /* ---------- haptics model + sound ---------- */
 function hapRamp(t0,t1,a0,a1){ const seg={kind:"ramp",t0,t1,a0,a1,kill:Infinity}; S.hap.push(seg); seg.snd=sndRamp(seg); return seg; }
 function hapPulse(t0,dur,amp){ const seg={kind:"pulse",t0,t1:t0+dur,amp}; S.hap.push(seg); sndPulse(seg); return seg; }
+function hapFall(t0,dur,a){ const seg={kind:"fall",t0,t1:t0+dur,a}; S.hap.push(seg); sndFall(seg); return seg; }
 function hapAt(t){
   let v=0;
   for(const s of S.hap){
     if(t<s.t0||t>=s.t1) continue;
     if(s.kind==="ramp"){ if(t>=s.kill) continue; const u=(t-s.t0)/(s.t1-s.t0); v=Math.max(v,s.a0+(s.a1-s.a0)*u*u); }
+    else if(s.kind==="fall"){ const u=(t-s.t0)/(s.t1-s.t0); v=Math.max(v,s.a*(1-u)*(1-u)); }
     else v=Math.max(v,s.amp);
   }
   return v;
@@ -319,6 +322,13 @@ function sndPulse(seg){
   v.g.gain.setValueAtTime(0,t0); v.g.gain.linearRampToValueAtTime(seg.amp/100,t0+.004);
   v.g.gain.setValueAtTime(seg.amp/100,t1-.004); v.g.gain.linearRampToValueAtTime(0,t1);
   v.o.forEach(o=>{o.start(t0); o.stop(t1+.02);});
+}
+function sndFall(seg){
+  if(!S.haptics||!S.sound||!audio()) return;
+  const v=voice(), t0=Math.max(AC.currentTime,aT(seg.t0)), t1=Math.max(t0+.02,aT(seg.t1)), N=32, curve=new Float32Array(N);
+  for(let i=0;i<N;i++){ const u=i/(N-1); curve[i]=seg.a/100*(1-u)*(1-u); }
+  v.g.gain.setValueAtTime(seg.a/100,t0); v.g.gain.setValueCurveAtTime(curve,t0+.001,t1-t0-.002);
+  v.o.forEach(o=>{o.start(t0); o.stop(t1+.01);});
 }
 function sndRamp(seg){
   if(!S.haptics||!S.sound||!audio()) return null;
@@ -383,7 +393,10 @@ function up(t){
   }
   else if(dur<P.commit){
     cls="early"; act = `early release, ${pr.mode==="start"?"start":"stop"} cancelled`;
-    killRamp(pr.ramp,t); if(pr.visual) setOverlay(makeFade(t,S.cur));
+    const rp=pr.ramp, live=rp && t>=rp.t0 && t<rp.t1 ? (()=>{const u=(t-rp.t0)/(rp.t1-rp.t0); return rp.a0+(rp.a1-rp.a0)*u*u;})() : 0;
+    killRamp(pr.ramp,t);
+    if(S.fall && S.haptics && live>0 && P.falloff>0) hapFall(t,P.falloff,live);
+    if(pr.visual) setOverlay(makeFade(t,S.cur));
   }
   else { cls="long"; act = pr.mode==="start" ? "recording started" : `recording stopped · ${S.hl} highlight${S.hl===1?"":"s"}`; }
   S.log.unshift({ms:Math.round(dur),cls,act}); renderLog();
@@ -516,6 +529,7 @@ function tick(){
 document.querySelectorAll("#batSeg button").forEach(b=>b.onclick=e=>{ S.bat=b.dataset.b; document.querySelectorAll("#batSeg button").forEach(x=>x.setAttribute("aria-pressed",x===b)); b.blur(); });
 $("hapBtn").onclick=e=>{ S.haptics=!S.haptics; e.currentTarget.setAttribute("aria-pressed",S.haptics); e.currentTarget.textContent=S.haptics?"Haptics on":"Haptics off"; e.currentTarget.blur(); };
 $("sndBtn").onclick=e=>{ S.sound=!S.sound; audio(); e.currentTarget.setAttribute("aria-pressed",S.sound); e.currentTarget.textContent=S.sound?"Buzz sound on":"Buzz sound off"; e.currentTarget.blur(); };
+$("fallBtn").onclick=e=>{ S.fall=!S.fall; e.currentTarget.setAttribute("aria-pressed",S.fall); e.currentTarget.textContent=S.fall?"Release falloff on":"Release falloff off"; renderSheet(); e.currentTarget.blur(); };
 $("flashBtn").onclick=e=>{ S.endFlashes=S.endFlashes===1?2:1; e.currentTarget.textContent=`End: ${S.endFlashes} white flash${S.endFlashes===1?"":"es"}`; e.currentTarget.setAttribute("aria-pressed",S.endFlashes===1); renderSheet(); e.currentTarget.blur(); };
 $("resetBtn").onclick=e=>{ Object.assign(S,{state:"standby",saving:false,baseMode:"off",overlay:null,press:null,hl:0}); S.sched=[]; $("device").classList.remove("down"); e.currentTarget.blur(); };
 $("clearLog").onclick=e=>{ S.log=[]; renderLog(); e.currentTarget.blur(); };
@@ -574,7 +588,7 @@ function renderSheet(){
     <li>${at(0)}–${at(29*F)} five fast red blinks (~${ms(5*F)} period), peaks at ${at(3*F)} ${at(8*F)} ${at(13*F)} ${at(18.5*F)} ${at(24*F)}</li>
     <li>${at(29*F)} final red peak, fades to off by ${at(40*F)} · release length ignored</li></ul></div>
   <div class="anim"><div class="t">Early release <span>${P.shortMax} &lt; hold &lt; ${P.commit}</span></div><ul>
-    <li>haptic ramp killed at release · LED fades back to prior state in 167 ms</li></ul></div>`;
+    <li>haptic ramp released: ${S.fall?`falls off from its current level to 0 over ${P.falloff} ms (ease-out, (1-u)²)`:"cut instantly"} · LED fades back to prior state in 167 ms</li></ul></div>`;
 }
 
 function renderLog(){
