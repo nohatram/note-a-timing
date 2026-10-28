@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Dot Note Timing Simulator</title>
+<style>
+/* Layout: instrument bench. Row 1 = device mock + live hold readout; row 2 = scrolling scope (button / LED / haptic / hardware); row 3 = controls + params; row 4 = timing sheet + press log. Single dark theme by choice. */
+:root{
+  --bg:#060607; --panel:#0f0e11; --panel2:#151419; --line:#26232c; --fg:#ece7e1; --mute:#8b8492; --dim:#5a5560;
+  --accent:#f2a65a; --accent2:#e0674a; --hot:#ffd8a8; --hw:#7fd6ff; --ok:#9be3b0;
+  --device:#e2e2e1; --device2:#d4d5d4; --devline:#bfc0bf;
+  --display:"Sora",ui-sans-serif,system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--fg)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-family:var(--display);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 56px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-weight:300;font-size:18px;margin:0}
+h2{font-weight:500;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin:0 0 10px;font-family:var(--mono)}
+.hint{font-family:var(--mono);font-size:12px;color:var(--mute)}
+kbd{font-family:var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}
+.row1{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:18px}
+@media (max-width:820px){.row1{grid-template-columns:minmax(0,1fr)}}
+
+/* device: portrait 58x91mm, LED and button placed from the product render */
+.bench{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;justify-items:center}
+.crop{width:100%;max-width:400px;aspect-ratio:393/215;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 78%,transparent);mask-image:linear-gradient(180deg,#000 78%,transparent)}
+.device{position:relative;width:100%;aspect-ratio:393/620;border-radius:30px;background:linear-gradient(160deg,#f2f2f2,#9c9d9e 45%,#e4e4e4 70%,#8e8f90);box-shadow:0 18px 40px #000a;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;outline:none}
+.device:focus-visible{box-shadow:0 0 0 2px var(--accent),0 18px 40px #000a}
+.body{position:absolute;inset:1.4% 2.2%;border-radius:26px;background:linear-gradient(180deg,#d6d6d5,#c9c9c8);box-shadow:inset 0 1px 0 #fff9}
+.face{position:absolute;left:4.1%;right:4.1%;top:23.4%;bottom:2.6%;border-radius:18px;background:linear-gradient(180deg,#fbfbfb,#f3f3f3);box-shadow:inset 0 1px 2px #0002}
+.lens{position:absolute;left:61.1%;top:11.8%;width:3.6%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:rgb(204,208,210);box-shadow:inset 0 1px 1px #0002}
+.glow{position:absolute;left:61.1%;top:11.8%;width:36%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;opacity:0}
+.btn{position:absolute;left:81.9%;top:11.8%;width:19.3%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle at 40% 35%,#fbfbfb,#d8d9d8 70%);border:1px solid #b9baba;box-shadow:0 2px 4px #0003,inset 0 1px 0 #fff;transition:transform .05s,box-shadow .05s}
+.device.down .btn{transform:translate(-50%,-50%) scale(.95);box-shadow:inset 0 2px 5px #0003}
+.ledread{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--mute)}
+.ledread b{color:var(--fg);font-weight:500}
+.sw{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:6px;background:#000;border:1px solid var(--line)}
+.status{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13px}
+.pill{padding:3px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px}
+.pill.rec{border-color:#2ccbfe55;color:var(--hw)}
+.pill.save{border-color:#f2a65a55;color:var(--accent)}
+
+/* readout */
+.read{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ms{font-family:var(--mono);font-weight:500;font-size:clamp(52px,10vw,96px);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.unit{font-family:var(--mono);color:var(--mute);font-size:16px}
+.sub{margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:13px;color:var(--mute)}
+.sub b{color:var(--fg);font-weight:500}
+.tag{color:var(--accent)}
+.ruler{position:relative;margin-top:26px;height:56px}
+.track{position:absolute;left:0;right:0;top:16px;height:6px;border-radius:3px;background:var(--line)}
+.zone{position:absolute;top:16px;height:6px;opacity:.22}
+.fill{position:absolute;left:0;top:16px;height:6px;border-radius:3px;width:0;background:linear-gradient(90deg,var(--accent),var(--hot))}
+.ghost{position:absolute;top:12px;width:2px;height:14px;background:var(--mute);opacity:.35}
+.tick{position:absolute;top:28px;font-family:var(--mono);font-size:10px;color:var(--mute);transform:translateX(-50%);white-space:nowrap}
+.tick::before{content:"";position:absolute;left:50%;top:-6px;width:1px;height:5px;background:var(--mute)}
+.ref{position:absolute;top:0;font-family:var(--mono);font-size:10px;color:var(--accent);transform:translateX(-50%);white-space:nowrap}
+.ref::after{content:"";position:absolute;left:50%;top:13px;width:1px;height:12px;background:var(--accent);opacity:.7}
+
+/* scope */
+.scopehead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.scopehead h2{margin:0}
+.scopewrap{overflow-x:auto}
+canvas{display:block;width:100%;height:330px;min-width:560px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:8px}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:3px;margin-right:6px}
+
+/* controls */
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}
+.field{display:grid;gap:6px}
+.field label,.lbl{font-family:var(--mono);font-size:11px;color:var(--mute)}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{flex:1}
+select,button,input{font:inherit;font-family:var(--mono);font-size:12px;color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}
+button:hover,select:hover,input:hover{border-color:var(--mute)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button[aria-pressed="true"]{border-color:var(--accent);color:var(--hot)}
+.params{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.params input{width:100%;min-width:0;font-variant-numeric:tabular-nums}
+
+/* sheet + log */
+.row4{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px}
+@media (max-width:900px){.row4{grid-template-columns:minmax(0,1fr)}}
+.sheet{display:grid;gap:14px}
+.anim{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:6px}
+.anim:first-child{border-top:0;padding-top:0}
+.anim .t{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:14px}
+.anim .t span{font-family:var(--mono);font-size:12px;color:var(--mute)}
+.anim ul{margin:0;padding:0;list-style:none;display:grid;gap:3px;font-family:var(--mono);font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.anim li b{color:var(--fg);font-weight:500}
+.anim .retime{color:var(--accent)}
+.anim .hwk{color:var(--hw)}
+.log{display:grid;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;max-height:520px;overflow:auto}
+.lrow{display:grid;grid-template-columns:28px 64px minmax(0,1fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+.lrow .n{color:var(--dim)}
+.lrow .c{color:var(--mute)}
+.lrow .a{min-width:0}
+.k-short{color:var(--ok)} .k-early{color:var(--accent)} .k-long{color:var(--hw)} .k-ign{color:var(--dim)}
+.empty{color:var(--mute);font-family:var(--mono);font-size:12px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Dot Note timing simulator</h1>
+    <div class="hint">hold <kbd>space</kbd> or the device button · <kbd>P</kbd> pauses the scope</div>
+  </header>
+
+  <div class="row1">
+    <div class="card bench">
+      <div class="crop"><div class="device" id="device" tabindex="0" aria-label="Dot Note button, hold to press">
+        <div class="body"></div>
+        <div class="face"></div>
+        <div class="glow" id="glow"></div>
+        <div class="lens" id="lens"></div>
+        <div class="btn"></div>
+      </div></div>
+      <div class="ledread">
+        <span><span class="sw" id="sw"></span><b id="hex">#000000</b></span>
+        <span>level <b id="lvl">0%</b></span>
+        <span>layer <b id="layer">off</b></span>
+      </div>
+      <div class="status"><span class="pill" id="statePill">Standby</span><span id="stateSub" class="hint"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>Hold</h2>
+      <div class="read"><div class="ms" id="ms">0</div><div class="unit">ms</div></div>
+      <div class="sub">
+        <div><b id="frames">0.0</b> frames @24fps</div>
+        <div class="tag" id="cat">-</div>
+      </div>
+      <div class="ruler" id="ruler">
+        <div class="track"></div>
+        <div class="fill" id="fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="scopehead">
+      <h2>Scope · ms from last press</h2>
+      <div class="seg" style="flex:0 0 auto">
+        <button id="pauseBtn" aria-pressed="false">Pause</button>
+        <select id="win" aria-label="Scope window"><option value="4000">4 s</option><option value="6000" selected>6 s</option><option value="10000">10 s</option></select>
+      </div>
+    </div>
+    <div class="scopewrap"><canvas id="scope" aria-label="Timeline of button, LED, haptic and hardware events"></canvas></div>
+    <div class="legend">
+      <span><i style="background:var(--fg)"></i>button</span>
+      <span><i style="background:linear-gradient(90deg,#2ccbfe,#fff,#5ff)"></i>LED emission</span>
+      <span><i style="background:var(--accent)"></i>haptic intensity</span>
+      <span><i style="background:var(--hw)"></i>hardware event</span>
+      <span><i style="background:var(--mute)"></i>300 / 1000 ms thresholds</span>
+    </div>
+  </div>
+
+  <div class="card controls">
+    <div class="field">
+      <span class="lbl">Battery band (standby short press)</span>
+      <div class="seg" id="batSeg">
+        <button data-b="batWhite" aria-pressed="true">25%+</button>
+        <button data-b="batOrange" aria-pressed="false">&lt;25%</button>
+        <button data-b="batRed" aria-pressed="false">2-10%</button>
+        <button data-b="crit" aria-pressed="false">&lt;2% critical</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Output</span>
+      <div class="seg">
+        <button id="hapBtn" aria-pressed="true">Haptics on</button>
+        <button id="sndBtn" aria-pressed="true">Buzz sound on</button>
+        <button id="flashBtn" aria-pressed="true">End: 1 white flash</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Session</span>
+      <div class="seg">
+        <button id="resetBtn">Reset to standby</button>
+        <button id="clearLog">Clear log</button>
+      </div>
+    </div>
+    <div class="field" style="grid-column:1/-1">
+      <span class="lbl">Timing parameters (ms) · edits retime the start and end animations live</span>
+      <div class="params" id="params"></div>
+    </div>
+  </div>
+
+  <div class="row4">
+    <div class="card">
+      <h2>Timing sheet</h2>
+      <div class="sheet" id="sheet"></div>
+    </div>
+    <div class="card">
+      <h2>Press log</h2>
+      <div class="log" id="log"><div class="empty">Each release lands here: duration, class, and what the device did.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {"begin":[[210,215,214,37,38,37,0.149],[211,216,215,42,43,42,0.17],[212,217,216,47,49,47,0.191],[212,217,216,47,49,47,0.191],[212,217,216,47,49,47,0.191],[213,218,217,53,54,53,0.213],[216,218,218,58,60,58,0.235],[214,219,218,58,60,58,0.234],[216,221,219,69,71,68,0.277],[218,220,219,67,69,67,0.271],[219,221,221,73,75,73,0.294],[218,223,222,79,81,79,0.319],[219,224,223,84,87,84,0.34],[221,223,223,85,84,83,0.333],[222,224,224,90,89,88,0.353],[223,225,225,95,94,93,0.373],[223,225,225,95,94,93,0.373],[223,225,225,95,94,93,0.373],[225,227,227,105,105,103,0.412],[226,228,228,110,110,109,0.431],[226,228,228,110,110,109,0.431],[227,229,229,115,115,114,0.451],[228,230,230,120,120,119,0.471],[229,231,231,125,125,124,0.49],[229,231,231,125,125,124,0.49],[230,232,232,130,130,129,0.511],[232,234,234,141,141,140,0.553],[232,234,234,141,141,140,0.553],[232,234,234,141,141,140,0.553],[233,235,235,146,146,146,0.574],[234,236,236,152,152,151,0.596],[235,237,237,157,157,157,0.617],[235,237,237,157,157,157,0.617],[236,238,238,162,163,162,0.638],[237,239,239,168,168,168,0.66],[239,239,239,175,174,173,0.686],[241,241,241,185,184,183,0.725],[239,241,241,178,179,178,0.702],[240,242,242,184,184,184,0.723],[243,243,243,195,194,194,0.765],[243,243,243,195,194,194,0.765],[242,244,244,194,195,195,0.766],[244,244,244,200,199,199,0.784],[245,245,245,205,204,204,0.804],[246,246,246,210,209,209,0.824],[246,246,246,210,209,209,0.824],[248,248,248,220,219,219,0.863],[249,249,249,225,225,224,0.882],[249,249,249,225,225,224,0.882],[250,250,250,230,230,229,0.902],[250,250,250,230,230,229,0.902],[251,251,251,235,235,235,0.922],[251,251,251,235,235,235,0.922],[251,251,251,235,235,235,0.922],[252,252,252,240,240,240,0.941],[252,252,252,240,240,240,0.941],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[229,231,231,125,125,124,0.49],[204,208,210,0,0,0,-0.0],[44,203,254,41,200,251,0.984],[44,203,254,41,200,251,0.984],[44,203,254,41,200,251,0.984],[123,204,230,10,88,113,0.444],[204,208,210,0,0,0,-0.0],[170,208,221,5,47,60,0.236],[123,204,230,10,88,113,0.444],[78,204,244,30,155,196,0.767],[44,203,254,39,198,249,0.978]],"end":[[44,203,254,39,198,249,0.978],[60,206,255,60,206,255,1.0],[88,211,254,81,204,247,0.969],[125,217,255,125,217,255,1.0],[161,223,255,160,222,254,0.996],[192,231,254,187,226,249,0.978],[216,239,255,216,239,255,1.0],[237,247,254,232,242,249,0.978],[255,255,255,255,255,255,1.0],[251,251,251,235,235,235,0.922],[246,246,246,210,209,209,0.824],[239,241,241,178,179,178,0.702],[232,234,234,141,141,140,0.553],[225,227,227,105,105,103,0.412],[217,222,221,76,76,75,0.298],[211,216,215,43,43,43,0.17],[205,209,211,6,6,6,0.022],[204,208,210,0,0,0,-0.0],[207,212,211,22,22,21,0.085],[213,218,217,54,54,53,0.213],[222,224,224,90,89,88,0.353],[228,230,230,120,120,119,0.471],[235,237,237,157,157,157,0.617],[241,243,243,189,190,189,0.745],[249,249,249,225,225,224,0.882],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[249,249,249,225,225,224,0.882],[241,243,243,189,190,189,0.745],[230,237,236,152,157,156,0.617],[221,230,231,112,119,119,0.468],[214,223,224,75,81,81,0.319],[208,217,218,45,49,49,0.191],[205,211,213,16,17,17,0.067],[204,208,210,0,0,0,-0.0],[203,209,211,4,6,5,0.022],[202,215,215,26,38,36,0.149],[198,220,218,44,65,63,0.255],[191,227,224,69,103,98,0.402],[180,233,230,85,136,132,0.532],[165,238,233,91,163,157,0.638],[145,245,238,102,201,193,0.787],[119,250,241,97,228,219,0.894],[96,253,243,87,244,234,0.957],[164,226,221,38,98,91,0.383],[204,208,210,0,0,0,-0.0],[227,225,167,115,111,52,0.451],[254,242,118,252,239,115,0.986],[232,227,156,140,133,61,0.549],[204,208,210,0,0,0,-0.0],[162,224,219,27,86,80,0.338],[97,253,243,88,244,234,0.957],[102,249,239,76,222,212,0.872],[112,245,238,67,199,192,0.781],[124,241,232,63,179,169,0.702],[136,236,229,54,152,144,0.596],[149,231,226,45,125,119,0.489],[160,223,221,21,81,78,0.319],[174,219,216,15,60,57,0.234],[185,214,213,8,33,31,0.128],[197,210,210,3,11,10,0.043],[204,208,210,0,0,0,-0.0]],"highlight":[[44,203,254,39,198,249,0.978],[189,231,253,180,222,244,0.956],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[251,253,253,242,244,244,0.957],[249,254,253,245,250,249,0.979],[247,254,253,243,250,249,0.979],[246,253,252,237,244,243,0.957],[243,253,254,238,248,249,0.978],[241,254,254,237,250,250,0.979],[238,253,253,229,244,244,0.957],[235,253,252,226,244,243,0.957],[232,254,252,228,250,248,0.979],[229,253,251,220,244,242,0.957],[224,253,252,215,244,243,0.957],[221,254,252,217,250,248,0.979],[215,254,250,211,250,245,0.979],[210,254,249,206,250,244,0.979],[207,252,249,194,239,235,0.936],[200,253,248,191,244,239,0.957],[196,253,249,187,244,240,0.957],[190,252,247,177,239,233,0.936],[182,253,246,173,244,237,0.957],[176,253,247,167,244,238,0.957],[171,253,246,162,244,237,0.957],[162,253,246,153,244,237,0.957],[154,252,244,141,239,230,0.936],[147,252,244,134,239,230,0.936],[141,253,245,132,244,236,0.957],[131,253,244,122,244,235,0.957],[126,252,245,112,237,230,0.93],[118,253,244,108,243,233,0.951],[111,253,245,102,244,236,0.957],[106,252,244,93,239,231,0.936],[100,253,244,92,245,236,0.96],[96,253,243,88,245,235,0.96],[93,250,242,72,228,220,0.896],[94,249,243,68,222,216,0.872],[92,247,243,57,212,207,0.83],[89,245,244,46,202,200,0.791],[87,243,244,37,192,193,0.756],[83,242,244,33,191,193,0.756],[81,239,247,45,202,210,0.822],[80,235,246,39,194,204,0.8],[77,235,247,40,197,209,0.82],[77,232,249,50,204,221,0.867],[73,230,249,46,202,221,0.867],[68,227,248,36,195,215,0.844],[65,224,250,42,201,227,0.889],[62,221,249,35,194,222,0.869],[59,217,250,36,194,227,0.889],[53,213,252,42,201,241,0.944],[50,210,252,34,194,235,0.922],[44,203,254,41,200,252,0.987]],"pulse":[[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,203,252,32,189,238,0.933],[46,203,252,32,189,238,0.933],[49,204,253,40,195,244,0.956],[49,204,253,40,195,244,0.956],[51,203,251,33,185,232,0.911],[51,203,251,33,185,232,0.911],[54,204,252,40,190,238,0.933],[55,203,252,41,189,238,0.933],[57,203,249,30,175,221,0.867],[61,204,249,34,176,221,0.867],[63,204,249,36,176,221,0.867],[66,204,248,34,172,215,0.844],[70,205,247,34,168,210,0.822],[72,204,245,27,158,198,0.778],[77,204,244,27,153,193,0.756],[81,204,243,27,149,187,0.733],[87,205,242,28,145,181,0.711],[91,204,240,23,135,170,0.667],[98,204,237,16,121,153,0.6],[104,205,237,22,122,153,0.6],[110,205,234,15,108,136,0.533],[117,205,233,17,103,130,0.511],[127,206,232,23,100,125,0.489],[133,206,231,24,95,119,0.467],[140,205,227,13,76,96,0.378],[145,207,225,9,68,85,0.333],[152,207,224,11,64,79,0.311],[159,207,222,10,55,68,0.267],[163,206,220,8,46,57,0.222],[167,207,219,7,41,51,0.2],[174,206,217,6,32,40,0.156],[176,207,216,5,28,35,0.138],[180,206,214,4,24,30,0.119],[183,206,213,4,21,26,0.104],[186,208,212,3,18,22,0.088],[187,207,212,3,17,21,0.083],[191,209,212,2,13,16,0.064],[193,208,212,2,11,14,0.054],[195,208,212,2,9,11,0.044],[197,207,210,1,7,9,0.034],[198,208,211,1,6,8,0.029],[199,208,209,1,5,6,0.025],[199,208,209,1,5,6,0.025],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[199,208,209,1,5,6,0.025],[199,208,209,1,5,6,0.025],[198,208,211,1,6,8,0.029],[197,207,210,1,7,9,0.034],[195,208,212,2,9,11,0.044],[193,208,212,2,11,14,0.054],[189,207,212,3,15,19,0.074],[187,207,212,3,17,21,0.083],[186,207,214,3,18,23,0.089],[183,206,215,4,22,28,0.111],[178,206,214,4,25,32,0.127],[175,206,215,5,28,36,0.142],[172,207,217,6,31,40,0.157],[167,207,219,7,40,51,0.2],[161,207,220,8,44,57,0.222],[155,206,222,9,53,68,0.267],[149,206,223,10,58,74,0.289],[144,205,226,13,71,91,0.356],[137,205,226,6,71,91,0.356],[131,206,230,18,90,113,0.444],[121,205,230,8,89,113,0.444],[115,205,233,15,103,130,0.511],[109,206,234,14,109,136,0.533],[101,205,236,15,117,147,0.578],[97,205,239,24,131,164,0.644],[89,204,240,21,135,170,0.667],[85,204,241,22,139,176,0.689],[81,204,245,36,158,198,0.778],[75,205,246,34,163,204,0.8],[72,204,245,27,158,198,0.778],[68,206,247,32,169,210,0.822],[66,204,248,34,172,215,0.844],[63,204,249,36,176,221,0.867],[61,204,251,43,186,232,0.911],[57,203,249,30,175,221,0.867],[55,203,252,41,189,238,0.933],[54,204,252,40,190,238,0.933],[51,203,251,33,185,232,0.911],[51,203,251,33,185,232,0.911],[49,204,253,40,195,244,0.956],[49,204,253,40,195,244,0.956],[46,203,252,32,189,238,0.933],[46,203,252,32,189,238,0.933],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978]],"batWhite":[[204,208,210,0,0,0,-0.0],[205,209,211,6,6,6,0.022],[210,214,216,34,34,34,0.133],[216,221,220,71,70,70,0.277],[225,227,227,105,105,103,0.412],[233,235,235,146,146,146,0.574],[243,243,243,195,194,194,0.765],[249,249,249,225,225,224,0.882],[252,252,252,240,240,240,0.941],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[251,251,251,235,235,235,0.922],[246,246,246,210,209,209,0.824],[241,241,241,185,184,183,0.725],[232,234,234,141,141,140,0.553],[226,228,228,110,110,109,0.431],[218,223,222,79,81,79,0.319],[212,217,216,47,49,47,0.191],[206,210,212,11,11,11,0.044],[204,208,210,0,0,0,-0.0]],"batOrange":[[204,208,210,0,0,0,-0.0],[206,206,201,11,6,0,0.043],[209,199,184,31,17,0,0.123],[217,190,158,65,36,0,0.255],[225,180,124,105,58,1,0.412],[233,166,93,145,76,2,0.569],[241,158,62,185,101,4,0.725],[249,149,36,225,125,11,0.882],[252,142,17,240,130,5,0.941],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[250,144,23,230,124,2,0.902],[247,152,44,215,119,11,0.843],[240,161,70,182,101,9,0.712],[233,171,98,143,79,6,0.561],[227,178,121,113,62,4,0.443],[218,188,149,74,41,3,0.29],[213,196,173,45,25,2,0.176],[206,201,194,19,11,1,0.076],[204,208,210,0,0,0,-0.0]],"batRed":[[204,208,210,0,0,0,-0.0],[205,200,202,10,0,0,0.038],[209,181,181,35,0,0,0.138],[215,153,154,67,1,0,0.267],[224,122,122,105,1,0,0.419],[234,86,86,150,1,0,0.59],[242,53,53,191,1,0,0.748],[248,24,26,224,0,2,0.885],[252,6,6,247,0,0,0.973],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[252,13,13,240,1,1,0.941],[245,35,36,211,0,1,0.832],[239,61,61,180,1,0,0.71],[232,89,91,145,0,1,0.572],[224,116,116,111,1,0,0.447],[218,144,146,77,0,1,0.308],[212,170,171,46,0,1,0.185],[206,194,194,19,0,0,0.075],[204,208,210,0,0,0,-0.0]],"crit":[[204,208,210,0,0,0,-0.0],[222,132,132,93,1,0,0.371],[243,39,38,206,1,0,0.819],[247,17,18,230,0,0,0.917],[224,107,107,121,1,0,0.49],[206,196,196,16,0,0,0.067],[216,159,159,62,0,1,0.243],[238,64,66,176,0,2,0.694],[254,0,2,254,0,2,1.0],[235,82,83,157,1,2,0.614],[210,173,173,45,0,1,0.176],[209,181,181,35,0,1,0.138],[233,90,92,147,1,3,0.575],[252,6,6,247,0,0,0.973],[241,56,55,187,2,0,0.738],[218,151,151,71,1,0,0.281],[205,200,202,10,0,0,0.038],[225,115,115,114,1,0,0.452],[248,24,26,224,0,2,0.885],[248,32,34,218,2,4,0.855],[223,125,124,103,2,0,0.41],[204,206,206,0,0,0,0.019],[219,141,142,81,1,0,0.324],[242,48,47,196,1,0,0.776],[250,11,11,239,0,0,0.948],[232,99,100,138,3,3,0.539],[208,189,189,26,1,1,0.1],[213,168,167,52,0,0,0.205],[236,74,75,163,0,0,0.644],[254,0,0,254,0,0,1.0],[252,8,10,244,0,2,0.962],[247,26,27,221,0,1,0.875],[242,47,46,198,1,0,0.781],[237,68,69,170,0,0,0.673],[231,91,92,142,0,0,0.562],[228,114,115,119,3,3,0.467],[220,137,139,85,0,1,0.341],[215,160,159,61,0,0,0.242],[210,180,180,36,0,0,0.143],[205,198,197,15,0,0,0.062],[204,208,210,0,0,0,-0.0]]};
+const F = 1000/24;
+DATA.end1 = DATA.end.slice(0,18).concat(DATA.end.slice(35)); // second white flash (f18-f34) removed
+const OFF = {c:[204,208,210], e:[0,0,0], a:0};
+const P = {debounce:40, shortMax:300, animStart:300, commit:1000, gap:50, saveAfter:500, lockout:0, buzzGap:40};
+const PDEF = [
+  ["debounce","Debounce"],["shortMax","Short press max"],["animStart","Long-press LED starts"],
+  ["commit","Long-press commit"],["gap","Ramp kill before buzz"],["saveAfter","Save time after stop (S)"],["lockout","Highlight lockout after start"],["buzzGap","Stop double-buzz gap"]
+];
+const $ = id => document.getElementById(id);
+
+/* ---------- color + frame helpers ---------- */
+const mix=(a,b,t)=>a+(b-a)*t;
+const mixC=(A,B,t)=>({c:A.c.map((v,i)=>mix(v,B.c[i],t)), e:A.e.map((v,i)=>mix(v,B.e[i],t)), a:mix(A.a,B.a,t)});
+function frameAt(name,pos){
+  const fr=DATA[name], n=fr.length-1, p=Math.max(0,Math.min(n,pos)), i=Math.floor(p), j=Math.min(n,i+1), t=p-i;
+  const A=fr[i], B=fr[j];
+  return {c:[0,1,2].map(k=>mix(A[k],B[k],t)), e:[3,4,5].map(k=>mix(A[k],B[k],t)), a:mix(A[6],B[6],t)};
+}
+function mapPos(map,ms){ // map: [[srcFrame, ms]...]
+  if(ms<=map[0][1]) return map[0][0];
+  for(let k=1;k<map.length;k++){ const [f0,t0]=map[k-1],[f1,t1]=map[k]; if(ms<=t1) return f0+(f1-f0)*((ms-t0)/(t1-t0||1)); }
+  return map[map.length-1][0];
+}
+
+/* ---------- animation definitions ---------- */
+const BUILD = {begin:[0,61,64,72], end:[0,44,47,61]}; // [first, build end, key frame, last]
+function animSpec(type){
+  const Te=Math.max(P.commit-P.animStart,0), B=Math.max(Te-3*F,10);
+  if(type==="begin") return {name:"begin", map:[[0,0],[61,B],[72,B+11*F]], fromN:0};
+  if(type==="end")   return S.endFlashes===1 ? {name:"end1", map:[[0,0],[27,B],[44,B+17*F]], fromN:8} : {name:"end", map:[[0,0],[44,B],[61,B+17*F]], fromN:8};
+  if(type==="highlight") return {name:"highlight", map:[[0,0],[55,55*F]], fromN:2};
+  const n=DATA[type].length-1;
+  return {name:type, map:[[0,0],[n,n*F]], fromN:0};
+}
+function makeAnim(type,t0,from,onEnd){
+  const s=animSpec(type), dur=s.map[s.map.length-1][1];
+  const R0=DATA[s.name][0][0], RN=s.fromN?DATA[s.name][s.fromN][0]:0;
+  return {type, label:type, t0, dur, onEnd, sample(t){
+    const pos=mapPos(s.map,t-t0);
+    if(s.fromN && from && pos<s.fromN){
+      const p=Math.max(0,Math.min(1,(frameAt(s.name,pos).c[0]-R0)/((RN-R0)||1)));
+      return mixC(from, frameAt(s.name,s.fromN), p);
+    }
+    return frameAt(s.name,pos);
+  }};
+}
+function makeFade(t0,from,dur=167){ // back to base layer
+  return {type:"fade", label:"fade to prior", t0, dur, sample(t){ const p=Math.min(1,(t-t0)/dur), e=p*p*(3-2*p); return mixC(from, baseAt(t), e); }};
+}
+
+/* ---------- simulator state ---------- */
+const S = {state:"standby", saving:false, baseMode:"off", pulseT0:0, overlay:null, cur:OFF,
+  recStart:0, hl:0, endFlashes:1, bat:"batWhite", haptics:true, sound:true,
+  press:null, sched:[], presses:[], led:[], hap:[], hw:[], log:[], lastPress:null};
+
+function baseAt(t){
+  if(S.baseMode!=="pulse") return OFF;
+  const pos=(((t-S.pulseT0)/F)%112+112)%112;
+  return frameAt("pulse",pos);
+}
+function ledAt(t){
+  if(S.overlay && t>=S.overlay.t0){
+    if(t-S.overlay.t0<S.overlay.dur) return S.overlay.sample(t);
+    const o=S.overlay; S.overlay=null; o.onEnd&&o.onEnd(o.t0+o.dur);
+  }
+  return baseAt(t);
+}
+function setOverlay(o){ S.overlay=o; }
+const toPulse = at => { S.baseMode="pulse"; S.pulseT0=at; };
+function hwEvent(t,label){ S.hw.push({t,label}); }
+function schedule(at,fn,tag){ S.sched.push({at,fn,tag}); S.sched.sort((a,b)=>a.at-b.at); }
+
+/* ---------- haptics model + sound ---------- */
+function hapRamp(t0,t1,a0,a1){ const seg={kind:"ramp",t0,t1,a0,a1,kill:Infinity}; S.hap.push(seg); seg.snd=sndRamp(seg); return seg; }
+function hapPulse(t0,dur,amp){ const seg={kind:"pulse",t0,t1:t0+dur,amp}; S.hap.push(seg); sndPulse(seg); return seg; }
+function hapAt(t){
+  let v=0;
+  for(const s of S.hap){
+    if(t<s.t0||t>=s.t1) continue;
+    if(s.kind==="ramp"){ if(t>=s.kill) continue; const u=(t-s.t0)/(s.t1-s.t0); v=Math.max(v,s.a0+(s.a1-s.a0)*u*u); }
+    else v=Math.max(v,s.amp);
+  }
+  return v;
+}
+function killRamp(seg,t){ if(!seg) return; seg.kill=Math.min(seg.kill,t); if(seg.snd) seg.snd.kill(t); }
+
+let AC=null, BUS=null;
+function audio(){
+  if(AC) return AC;
+  try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    const lp=AC.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=900; lp.Q.value=4;
+    const m=AC.createGain(); m.gain.value=.5; lp.connect(m); m.connect(AC.destination); BUS=lp;
+  }catch(e){ AC=null; }
+  return AC;
+}
+const aT = ms => AC.currentTime + (ms-performance.now())/1000;
+function voice(){
+  const g=AC.createGain(); g.gain.value=0; g.connect(BUS);
+  const o1=AC.createOscillator(), o2=AC.createOscillator(); o1.type="sawtooth"; o1.frequency.value=172; o2.type="square"; o2.frequency.value=86;
+  const g2=AC.createGain(); g2.gain.value=.45; o1.connect(g); o2.connect(g2); g2.connect(g);
+  return {g,o:[o1,o2]};
+}
+function sndPulse(seg){
+  if(!S.haptics||!S.sound||!audio()) return;
+  const v=voice(), t0=Math.max(AC.currentTime,aT(seg.t0)), t1=Math.max(t0+.01,aT(seg.t1));
+  v.g.gain.setValueAtTime(0,t0); v.g.gain.linearRampToValueAtTime(seg.amp/100,t0+.004);
+  v.g.gain.setValueAtTime(seg.amp/100,t1-.004); v.g.gain.linearRampToValueAtTime(0,t1);
+  v.o.forEach(o=>{o.start(t0); o.stop(t1+.02);});
+}
+function sndRamp(seg){
+  if(!S.haptics||!S.sound||!audio()) return null;
+  const v=voice(), t0=Math.max(AC.currentTime,aT(seg.t0)), t1=Math.max(t0+.02,aT(seg.t1)), N=64, curve=new Float32Array(N);
+  for(let i=0;i<N;i++){ const u=i/(N-1); curve[i]=(seg.a0+(seg.a1-seg.a0)*u*u)/100; }
+  v.g.gain.setValueAtTime(0,t0); v.g.gain.setValueCurveAtTime(curve,t0+.001,t1-t0-.006);
+  v.o.forEach(o=>{o.start(t0); o.stop(t1);});
+  return {kill(ms){ const t=Math.max(AC.currentTime,aT(ms)); v.o.forEach(o=>{ try{o.stop(t);}catch(e){} }); }};
+}
+
+/* ---------- button logic ---------- */
+function down(t){
+  if(S.press) return;
+  audio(); if(AC&&AC.state==="suspended") AC.resume();
+  const mode = S.state==="recording" ? "stop" : "start";
+  const pr = S.press = {t0:t, mode, ramp:null, visual:false, committed:false, from:S.state};
+  S.presses.push({t0:t,t1:null}); S.lastPress=t;
+  $("device").classList.add("down");
+  if(mode==="start" && S.bat==="crit"){ // too low to record: plays on press-down, any press length
+    pr.crit=true; hwEvent(t,"battery read · critical"); setOverlay(makeAnim("crit",t,S.cur,null));
+    if(S.haptics) [2,7,12].forEach(f=>hapPulse(t+f*F,60,70)); return;
+  }
+  schedule(t+P.shortMax, at=>{ // long press recognized: haptic build
+    if(S.haptics){ const end=t+P.commit-P.gap; if(end>at){ pr.ramp = hapRamp(at,end,15,65); pr.ramp.press=true; } }
+  },"press");
+  schedule(t+P.animStart, at=>{ pr.visual=true; setOverlay(makeAnim(mode==="start"?"begin":"end", at, S.cur, mode==="start"?toPulse:()=>{S.baseMode="off";})); },"press");
+  schedule(t+P.commit, at=>{
+    pr.committed=true;
+    if(pr.ramp) killRamp(pr.ramp, at-P.gap);
+    if(mode==="start"){
+      S.state="recording"; S.saving=false; S.recStart=at; S.hl=0;
+      hwEvent(at,"capture start");
+      if(S.haptics) hapPulse(at,80,80);
+    } else {
+      S.state="standby"; S.saving=true;
+      hwEvent(at,"capture stop");
+      if(S.haptics){ hapPulse(at,80,80); hapPulse(at+80+P.buzzGap,80,80); }
+      schedule(at+P.saveAfter, s=>{ hwEvent(s,"files saved"); S.saving=false; },"global");
+    }
+  },"press");
+}
+
+function up(t){
+  const pr=S.press; if(!pr) return;
+  S.press=null; $("device").classList.remove("down");
+  S.presses[S.presses.length-1].t1=t;
+  S.sched=S.sched.filter(e=>e.tag!=="press");
+  const dur=t-pr.t0; let cls, act;
+  if(pr.crit){ cls = dur<P.debounce?"ign":dur<=P.shortMax?"short":dur<P.commit?"early":"long"; act="critical battery, please charge · recording refused"; }
+  else if(dur<P.debounce){ cls="ign"; act="below debounce, ignored"; if(pr.visual) setOverlay(makeFade(t,S.cur)); }
+  else if(dur<=P.shortMax){
+    cls="short";
+    if(pr.from==="recording"){
+      const since=t-S.recStart;
+      if(since<P.lockout){ act=`highlight ignored (${Math.round(since)} ms into recording, lockout ${P.lockout})`; if(pr.visual) setOverlay(makeFade(t,S.cur)); }
+      else if(S.hl>=20){ act="highlight cap (20) reached, no LED"; hwEvent(t,"highlight refused"); if(pr.visual) setOverlay(makeFade(t,S.cur)); }
+      else { S.hl++; hwEvent(t,`highlight #${S.hl}`); setOverlay(makeAnim("highlight",t,S.cur,toPulse)); act=`highlight #${S.hl} at ${fmtClock(since)}`; }
+    } else {
+      hwEvent(pr.t0,"battery read"); setOverlay(makeAnim(S.bat,t,S.cur,null));
+      act=`battery check · ${({batWhite:"25%+ white",batOrange:"<25% orange",batRed:"2-10% red"})[S.bat]}`;
+    }
+  }
+  else if(dur<P.commit){
+    cls="early"; act = `early release, ${pr.mode==="start"?"start":"stop"} cancelled`;
+    killRamp(pr.ramp,t); if(pr.visual) setOverlay(makeFade(t,S.cur));
+  }
+  else { cls="long"; act = pr.mode==="start" ? "recording started" : `recording stopped · ${S.hl} highlight${S.hl===1?"":"s"}`; }
+  S.log.unshift({ms:Math.round(dur),cls,act}); renderLog();
+  readout(dur,true);
+}
+const fmtClock = ms => { const s=Math.max(0,Math.floor(ms/1000)); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; };
+
+/* ---------- input ---------- */
+const typing = e => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+addEventListener("keydown",e=>{
+  if(typing(e)) return;
+  if(e.code==="Space"){ e.preventDefault(); if(!e.repeat) down(e.timeStamp); }
+  else if(e.code==="KeyP" && !e.metaKey && !e.ctrlKey){ togglePause(); }
+});
+addEventListener("keyup",e=>{ if(e.code==="Space"){ e.preventDefault(); up(e.timeStamp); } });
+addEventListener("blur",()=>{ if(S.press) up(performance.now()); });
+const dev=$("device");
+dev.addEventListener("pointerdown",e=>{ if(e.button!==0) return; dev.setPointerCapture(e.pointerId); down(e.timeStamp); });
+dev.addEventListener("pointerup",e=>up(e.timeStamp));
+dev.addEventListener("pointercancel",e=>up(e.timeStamp));
+dev.addEventListener("contextmenu",e=>e.preventDefault());
+
+/* ---------- live readout + ruler ---------- */
+const RSCALE=2000, pct=ms=>Math.min(ms/RSCALE,1)*100;
+function category(ms){
+  if(ms<P.debounce) return "debounce";
+  if(ms<=P.shortMax) return S.press ? "short press window" : "short press";
+  if(ms<P.commit) return S.press ? (S.press.mode==="start"?"building to start":"building to stop") : "early release";
+  return S.press ? (S.press.mode==="start"?"recording":"stopped") : "long press";
+}
+function readout(ms,final){
+  $("ms").textContent=Math.round(ms);
+  $("frames").textContent=(ms/F).toFixed(1);
+  $("cat").textContent=category(ms);
+  $("fill").style.width=pct(ms)+"%";
+}
+function drawRuler(){
+  const r=$("ruler"); r.querySelectorAll(".tick,.ref,.ghost,.zone").forEach(n=>n.remove());
+  const z=(a,b,c)=>{const d=document.createElement("div");d.className="zone";d.style.left=pct(a)+"%";d.style.width=(pct(b)-pct(a))+"%";d.style.background=c;r.appendChild(d);};
+  z(P.debounce,P.shortMax,"var(--ok)"); z(P.shortMax,P.commit,"var(--accent)"); z(P.commit,RSCALE,"var(--hw)");
+  for(let t=0;t<=RSCALE;t+=250){ const d=document.createElement("div"); d.className="tick"; d.style.left=pct(t)+"%"; d.textContent=t; if(t===0) d.style.transform="none"; if(t===RSCALE) d.style.transform="translateX(-100%)"; r.appendChild(d); }
+  [[P.shortMax,"short / hold"],[P.commit,"commit"]].forEach(([t,l])=>{ const d=document.createElement("div"); d.className="ref"; d.style.left=pct(t)+"%"; d.textContent=`${l} ${t}`; r.appendChild(d); });
+  S.log.slice(0,12).forEach(h=>{ const g=document.createElement("div"); g.className="ghost"; g.style.left=`calc(${pct(h.ms)}% - 1px)`; r.appendChild(g); });
+}
+
+/* ---------- scope ---------- */
+const cv=$("scope"), cx=cv.getContext("2d");
+let paused=false, pauseAt=0, WIN=6000;
+function togglePause(){ paused=!paused; pauseAt=performance.now(); $("pauseBtn").setAttribute("aria-pressed",paused); $("pauseBtn").textContent=paused?"Resume":"Pause"; }
+$("pauseBtn").onclick=e=>{ togglePause(); e.currentTarget.blur(); };
+$("win").onchange=e=>{ WIN=+e.target.value; e.target.blur(); };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function drawScope(now){
+  const dpr=devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight;
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){ cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
+  cx.setTransform(dpr,0,0,dpr,0,0); cx.clearRect(0,0,w,h);
+  const L=82, Rm=10, x0=now-WIN, X=t=>L+(t-x0)/WIN*(w-L-Rm);
+  const tracks={btn:[18,22], led:[58,40], hap:[118,120], hw:[258,40]};
+  const fg=css("--fg"), mute=css("--mute"), line=css("--line"), dim=css("--dim"), acc=css("--accent"), hw=css("--hw");
+  cx.font="11px "+css("--mono"); cx.textBaseline="middle";
+  // labels
+  cx.fillStyle=mute; [["button","btn"],["LED","led"],["haptic","hap"],["hardware","hw"]].forEach(([l,k])=>cx.fillText(l,0,tracks[k][0]+tracks[k][1]/2));
+  cx.fillStyle=dim; cx.fillText("100%",44,tracks.hap[0]+4); cx.fillText("0",44,tracks.hap[0]+tracks.hap[1]-4);
+  // grid relative to last press
+  const ref=S.lastPress ?? now;
+  for(let k=Math.ceil((x0-ref)/500)*500;k<=now-ref;k+=500){
+    const x=X(ref+k); cx.strokeStyle=k===0?mute:line; cx.globalAlpha=k===0?.8:1; cx.beginPath(); cx.moveTo(x,10); cx.lineTo(x,h-18); cx.stroke(); cx.globalAlpha=1;
+    if(k%1000===0||WIN<=4000){ cx.fillStyle=k===0?fg:dim; cx.textAlign="center"; cx.fillText(k,x,h-8); cx.textAlign="left"; }
+  }
+  // hap gridlines
+  [0,.5,1].forEach(f=>{ const y=tracks.hap[0]+tracks.hap[1]*(1-f); cx.strokeStyle=line; cx.setLineDash([2,4]); cx.beginPath(); cx.moveTo(L,y); cx.lineTo(w-Rm,y); cx.stroke(); cx.setLineDash([]); });
+  // thresholds per press
+  S.presses.forEach(p=>{
+    if((p.t1??now)<x0-1000) return;
+    [P.shortMax,P.commit].forEach(d=>{ const t=p.t0+d; if(p.t1!==null && p.t1<t) return; if(t<x0||t>now) return; const x=X(t); cx.strokeStyle=mute; cx.setLineDash([3,3]); cx.beginPath(); cx.moveTo(x,10); cx.lineTo(x,tracks.hap[0]+tracks.hap[1]); cx.stroke(); cx.setLineDash([]); });
+  });
+  // button
+  const [by,bh]=tracks.btn; cx.fillStyle=line; cx.fillRect(L,by+bh-2,w-L-Rm,2);
+  S.presses.forEach(p=>{ const a=Math.max(p.t0,x0), b=Math.min(p.t1??now,now); if(b<=a) return; cx.fillStyle=fg; cx.fillRect(X(a),by,X(b)-X(a),bh-4); });
+  // LED strip (emission)
+  const [ly,lh]=tracks.led; cx.fillStyle="#000"; cx.fillRect(L,ly,w-L-Rm,lh);
+  for(const s of S.led){ if(s.t<x0) continue; const x=X(s.t); cx.fillStyle=`rgb(${s.e[0]|0},${s.e[1]|0},${s.e[2]|0})`; cx.fillRect(x,ly,Math.max(1.5,(w-L)/WIN*17+.5),lh); }
+  cx.strokeStyle=line; cx.strokeRect(L+.5,ly+.5,w-L-Rm-1,lh-1);
+  // haptic
+  const [hy,hh]=tracks.hap, step=WIN/(w-L);
+  cx.beginPath(); cx.moveTo(X(x0),hy+hh);
+  for(let t=x0;t<=now;t+=step){ cx.lineTo(X(t),hy+hh-hapAt(t)/100*hh); }
+  cx.lineTo(X(now),hy+hh); cx.closePath(); cx.fillStyle=acc+"33"; cx.fill();
+  cx.beginPath(); let first=true;
+  for(let t=x0;t<=now;t+=step){ const y=hy+hh-hapAt(t)/100*hh; if(first){cx.moveTo(X(t),y);first=false;} else cx.lineTo(X(t),y); }
+  cx.strokeStyle=acc; cx.lineWidth=1.5; cx.stroke(); cx.lineWidth=1;
+  // hardware events
+  const [wy,wh]=tracks.hw; let lastX=-999, row=0;
+  S.hw.filter(e=>e.t>=x0&&e.t<=now).forEach(e=>{
+    const x=X(e.t); cx.strokeStyle=hw; cx.globalAlpha=.55; cx.beginPath(); cx.moveTo(x,ly); cx.lineTo(x,wy+6); cx.stroke(); cx.globalAlpha=1;
+    row = x-lastX<120 ? (row+1)%2 : 0; lastX=x;
+    cx.fillStyle=hw; cx.beginPath(); cx.arc(x,wy+6,3,0,7); cx.fill();
+    const rel=Math.round(e.t-ref), txt=`${e.label}${S.lastPress!=null?` · ${rel}`:""}`;
+    const tw=cx.measureText(txt).width, tx=Math.min(x+6,w-Rm-tw);
+    cx.fillText(txt,tx,wy+6+row*16);
+  });
+}
+
+/* ---------- main loop ---------- */
+function tick(){
+  const now=performance.now();
+  while(S.sched.length && S.sched[0].at<=now){ const ev=S.sched.shift(); ev.fn(ev.at); }
+  const c=ledAt(now); S.cur=c;
+  S.led.push({t:now,e:c.e}); if(!paused) while(S.led.length&&S.led[0].t<now-11000) S.led.shift();
+  if(!paused){ S.hap=S.hap.filter(s=>s.t1>now-11000); S.hw=S.hw.filter(e=>e.t>now-11000); S.presses=S.presses.filter(p=>(p.t1??now)>now-11000); }
+  // device LED
+  const [r,g,b]=c.c, [er,eg,eb]=c.e;
+  $("lens").style.background=`rgb(${r|0},${g|0},${b|0})`;
+  const gl=$("glow"); gl.style.opacity=c.a; gl.style.background=`radial-gradient(closest-side, rgba(${Math.min(255,er/c.a||0)|0},${Math.min(255,eg/c.a||0)|0},${Math.min(255,eb/c.a||0)|0},.55), transparent 70%)`;
+  $("sw").style.background=`rgb(${er|0},${eg|0},${eb|0})`;
+  $("hex").textContent="#"+[er,eg,eb].map(v=>Math.round(v).toString(16).padStart(2,"0")).join("");
+  $("lvl").textContent=Math.round(c.a*100)+"%";
+  $("layer").textContent=S.overlay&&now>=S.overlay.t0?S.overlay.label:(S.baseMode==="pulse"?"pulse":"off");
+  // state pill
+  const pill=$("statePill");
+  if(S.state==="recording"){ pill.textContent="Recording"; pill.className="pill rec"; $("stateSub").textContent=`${fmtClock(now-S.recStart)} · ${S.hl} highlight${S.hl===1?"":"s"}`; }
+  else if(S.saving){ pill.textContent="Saving"; pill.className="pill save"; $("stateSub").textContent="finalizing files"; }
+  else { pill.textContent="Standby"; pill.className="pill"; $("stateSub").textContent="LED off"; }
+  if(S.press) readout(now-S.press.t0);
+  if(!paused) drawScope(now); else drawScope(pauseAt);
+  requestAnimationFrame(tick);
+}
+
+/* ---------- controls ---------- */
+document.querySelectorAll("#batSeg button").forEach(b=>b.onclick=e=>{ S.bat=b.dataset.b; document.querySelectorAll("#batSeg button").forEach(x=>x.setAttribute("aria-pressed",x===b)); b.blur(); });
+$("hapBtn").onclick=e=>{ S.haptics=!S.haptics; e.currentTarget.setAttribute("aria-pressed",S.haptics); e.currentTarget.textContent=S.haptics?"Haptics on":"Haptics off"; e.currentTarget.blur(); };
+$("sndBtn").onclick=e=>{ S.sound=!S.sound; audio(); e.currentTarget.setAttribute("aria-pressed",S.sound); e.currentTarget.textContent=S.sound?"Buzz sound on":"Buzz sound off"; e.currentTarget.blur(); };
+$("flashBtn").onclick=e=>{ S.endFlashes=S.endFlashes===1?2:1; e.currentTarget.textContent=`End: ${S.endFlashes} white flash${S.endFlashes===1?"":"es"}`; e.currentTarget.setAttribute("aria-pressed",S.endFlashes===1); renderSheet(); e.currentTarget.blur(); };
+$("resetBtn").onclick=e=>{ Object.assign(S,{state:"standby",saving:false,baseMode:"off",overlay:null,press:null,hl:0}); S.sched=[]; $("device").classList.remove("down"); e.currentTarget.blur(); };
+$("clearLog").onclick=e=>{ S.log=[]; renderLog(); e.currentTarget.blur(); };
+
+function renderParams(){
+  const box=$("params"); box.innerHTML="";
+  PDEF.forEach(([k,l])=>{
+    const f=document.createElement("div"); f.className="field";
+    f.innerHTML=`<label for="p_${k}">${l}</label><input id="p_${k}" type="number" min="0" step="10" value="${P[k]}">`;
+    f.querySelector("input").addEventListener("input",e=>{ const v=+e.target.value; if(Number.isFinite(v)&&v>=0){ P[k]=v; renderSheet(); drawRuler(); } });
+    box.appendChild(f);
+  });
+}
+
+function renderSheet(){
+  const Te=Math.max(P.commit-P.animStart,0), B=Math.max(Te-3*F,10), ramp1=P.commit-P.gap;
+  const fx = src => (src/B).toFixed(2)+"×";
+  const ms = v => Math.round(v)+" ms";
+  const at = v => `<b>${Math.round(v)}</b>`;
+  const begSrc=61*F, endSrc=(S.endFlashes===1?27:44)*F, s0=P.animStart;
+  $("sheet").innerHTML = `
+  <div class="anim"><div class="t">Begin recording <span>long press from standby · AE 73f / ${ms(73*F)}</span></div><ul>
+    <li>${at(0)} press · LED holds off through the short-press window</li>
+    <li>${at(P.shortMax)} haptic build 15→65% (u²) until ${at(ramp1)}, then killed for ${P.gap} ms</li>
+    <li>${at(s0)} white ramp starts (AE f0–61, dim 12% cool white to full)</li>
+    <li class="retime">white ramp retimed ${ms(begSrc)} → ${ms(B)} · ${fx(begSrc)} faster</li>
+    <li>${at(s0+B)} blink off (f62–63, native 83 ms)</li>
+    <li class="hwk">${at(P.commit)} first blue flash = AUDIO CAPTURE START · 80 ms buzz @80%</li>
+    <li>${at(P.commit+125)}–${at(P.commit+333)} blue blink and ramp in (f67–72, native)</li>
+    <li>${at(P.commit+333)} lands on blue peak → pulse loop frame 0</li></ul></div>
+  <div class="anim"><div class="t">Recording pulse <span>loop · AE 112f / ${ms(112*F)}</span></div><ul>
+    <li>loop point is the blue peak (#2CCBFE); ≥90% held ±${ms(12*F)} around it</li>
+    <li>${at(0)} peak → 50% at ${at(27.5*F)} → dark (≤3%) ${at(46*F)}–${at(66*F)}</li>
+    <li>50% at ${at(84.5*F)} → peak at ${at(112*F)} · symmetric ease, native timing kept</li></ul></div>
+  <div class="anim"><div class="t">Highlight <span>short press while recording · AE 56f</span></div><ul>
+    <li>${at(0)} on release (no haptic) · marker saved at release</li>
+    <li>${at(0)}–${at(2*F)} current LED color → full white (2 frames, from whatever the pulse is showing)</li>
+    <li>${at(2*F)}–${at(6*F)} white hold</li>
+    <li>${at(6*F)}–${at(37*F)} white → mint (red channel fades, full level)</li>
+    <li>${at(37*F)}–${at(55*F)} mint → blue, arrives on blue peak</li>
+    <li>${at(55*F)} total ${ms(55*F)} · pulse restarts at its peak frame, seamless</li></ul></div>
+  <div class="anim"><div class="t">End recording <span>long press while recording · AE 62f / ${ms(62*F)}</span></div><ul>
+    <li>${at(0)} press · pulse continues through the short-press window</li>
+    <li>${at(P.shortMax)} haptic build 15→65% (u²) until ${at(ramp1)}, then killed for ${P.gap} ms · identical to start</li>
+    <li>${at(s0)} current color → white (AE f0–8), white double breath, mint rise (to f44)</li>
+    <li class="retime">build retimed ${ms(endSrc)} → ${ms(B)} · ${fx(endSrc)} faster</li>
+    <li class="hwk">${at(P.commit)} yellow flash peak (f47) = AUDIO CAPTURE STOP · 80 ms @80% (same as start), ${P.buzzGap} ms gap, second 80 ms @80% (ends ${Math.round(P.commit+160+P.buzzGap)})</li>
+    <li>${at(P.commit)}–${at(P.commit+14*F)} mint tail fades to off (f47–61, native)</li>
+    <li class="hwk">${at(P.commit+P.saveAfter)} files saved (S) · hardware only, no haptic</li></ul></div>
+  <div class="anim"><div class="t">Battery check <span>short press in standby · AE 34f / ${ms(34*F)}</span></div><ul>
+    <li class="hwk">${at(0)} battery sampled at accepted press-down (cached value ready before release)</li>
+    <li>release + ${at(0)}–${at(9*F)} fade in · hold to ${at(25*F)} · fade out to ${at(34*F)} · no haptic</li></ul></div>
+  <div class="anim"><div class="t">Critical battery <span>any press in standby below 2% · AE 40f / ${ms(40*F)}</span></div><ul>
+    <li class="hwk">${at(0)} on press-down: battery read, recording refused, no haptic ramp</li>
+    <li>${at(2*F)} ${at(7*F)} ${at(12*F)} three quick buzzes, 60 ms @70%, each landing on one of the first three blink peaks</li>
+    <li>${at(0)}–${at(29*F)} five fast red blinks (~${ms(5*F)} period), peaks at ${at(3*F)} ${at(8*F)} ${at(13*F)} ${at(18.5*F)} ${at(24*F)}</li>
+    <li>${at(29*F)} final red peak, fades to off by ${at(40*F)} · release length ignored</li></ul></div>
+  <div class="anim"><div class="t">Early release <span>${P.shortMax} &lt; hold &lt; ${P.commit}</span></div><ul>
+    <li>haptic ramp killed at release · LED fades back to prior state in 167 ms</li></ul></div>`;
+}
+
+function renderLog(){
+  const log=$("log");
+  if(!S.log.length){ log.innerHTML='<div class="empty">Each release lands here: duration, class, and what the device did.</div>'; drawRuler(); return; }
+  log.innerHTML=S.log.map((h,i)=>`<div class="lrow"><span class="n">${S.log.length-i}</span><span>${h.ms} ms</span><span class="a"><span class="k-${h.cls}">${({short:"short",early:"early",long:"long",ign:"ignored"})[h.cls]}</span> <span class="c">· ${h.act}</span></span></div>`).join("");
+  drawRuler();
+}
+
+renderParams(); renderSheet(); renderLog();
+requestAnimationFrame(tick);
+</script>
+
+</body>
+</html>
