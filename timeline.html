@@ -118,7 +118,7 @@ class TL{
 /* ---------- interaction scripts (all times absolute ms) ---------- */
 const act = {
   battery(T,press,rel,band){ T.btn.push([press,rel,"short"]); T.hw.push({t:press,label:"battery read"}); T.overlay(band,rel); },
-  crit(T,press,rel){ T.btn.push([press,rel,"any"]); T.hw.push({t:press,label:"below 2%: recording refused"}); T.overlay("crit",press); [2,7,12].forEach(f=>T.pulse(press+f*F,60,70)); },
+  crit(T,press,rel){ T.btn.push([press,rel,"any"]); T.hw.push({t:press,label:"below 2%: recording refused"}); T.overlay("crit",press); [[80,80],[497,55],[955,30]].forEach(([d,a])=>T.pulse(press+d,90,a)); },
   start(T,press,rel){ T.btn.push([press,rel,"long"]); T.thr.push(press);
     const end=T.overlay("begin",press+P.start); T.setBase(end,"pulse");
     const r=T.ramp(press+P.start,press+P.commit-P.gap,15,65); r.cut=press+P.commit-P.gap;
