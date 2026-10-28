@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Note A Interaction Timeline</title>
+<style>
+/* Layout: header, then one wide scrolling canvas. Top = the main session timeline (button / LED / haptic / hardware lanes, like the 2.1 graphs);
+   below it, branch graphs aligned on the same ms scale, hanging off the moment they diverge. Single dark theme by choice, matching the simulator. */
+:root{
+  --bg:#060607; --panel:#0f0e11; --line:#26232c; --fg:#ece7e1; --mute:#8b8492; --dim:#5a5560;
+  --accent:#f2a65a; --hw:#7fd6ff; --rel:#e0674a;
+  --sans:ui-sans-serif,-apple-system,"Segoe UI","Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg)}
+body{font-family:var(--sans);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 48px}
+.wrap{max-width:1400px;margin:0 auto;display:grid;gap:16px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+h1{font-weight:500;font-size:18px;margin:0 0 6px}
+.sub{color:var(--mute);font-size:13px;max-width:70ch;line-height:1.5;margin:0}
+.ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--mute)}
+button{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--mute)}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:3px;margin-right:6px;border-radius:2px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);position:relative}
+canvas{display:block}
+#tip{position:fixed;pointer-events:none;background:#000;border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-family:var(--mono);font-size:11px;color:var(--fg);white-space:nowrap;z-index:5;font-variant-numeric:tabular-nums}
+#tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:1px solid var(--line)}
+.notes{color:var(--mute);font-size:12px;line-height:1.6;max-width:90ch;margin:0}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<nav style="display:flex;gap:14px;font:12px ui-monospace,Menlo,monospace;color:#8b8492"><a href="./" style="color:#8b8492">simulator</a><a href="timeline.html" style="color:#f2a65a">timeline</a></nav>
+
+  <header>
+    <div>
+      <h1>Note A interaction timeline</h1>
+      <p class="sub">One continuous session on the top graph: battery check, start recording, a highlight, end recording. Short presses are drawn released at 150 ms, but any release up to 300 ms behaves the same; their animations start on release. The graphs below branch off at the dashed connector and show the alternate outcome of that same moment. All times in ms; branch axes count from their own press.</p>
+    </div>
+    <div class="ctrl">
+      <span>scale</span>
+      <button data-z="0.1">1×</button>
+      <button data-z="0.16" aria-pressed="true">1.6×</button>
+      <button data-z="0.28">2.8×</button>
+    </div>
+  </header>
+  <div class="legend">
+    <span><i style="background:var(--fg)"></i>button held</span>
+    <span><i style="background:linear-gradient(90deg,#2ccbfe,#fff,#60fdf3,#fff374)"></i>LED output, true color and level</span>
+    <span><i style="background:var(--accent)"></i>haptic intensity</span>
+    <span><i style="background:var(--hw)"></i>hardware event</span>
+    <span><i style="background:var(--rel)"></i>release</span>
+    <span><i style="background:var(--mute)"></i>+300 / +1000 thresholds</span>
+  </div>
+  <div class="scroll" id="scroll"><canvas id="cv" aria-label="Timeline of button, LED, haptic and hardware events for each Note A interaction"></canvas></div>
+  <p class="notes">LED lanes are rendered from the After Effects frames retimed to the spec (start and end builds squeezed to 575 ms, end uses the single white flash). Haptic curves: build 15% to 65% (u²) from +300 to +950, cut 50 ms before each confirm; confirms are 80 ms at 80%; early release falls off over 300 ms on a cosine arc. Hover any lane for exact values.</p>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+const DATA = {"begin":[[210,215,214,37,38,37,0.149],[211,216,215,42,43,42,0.17],[212,217,216,47,49,47,0.191],[212,217,216,47,49,47,0.191],[212,217,216,47,49,47,0.191],[213,218,217,53,54,53,0.213],[216,218,218,58,60,58,0.235],[214,219,218,58,60,58,0.234],[216,221,219,69,71,68,0.277],[218,220,219,67,69,67,0.271],[219,221,221,73,75,73,0.294],[218,223,222,79,81,79,0.319],[219,224,223,84,87,84,0.34],[221,223,223,85,84,83,0.333],[222,224,224,90,89,88,0.353],[223,225,225,95,94,93,0.373],[223,225,225,95,94,93,0.373],[223,225,225,95,94,93,0.373],[225,227,227,105,105,103,0.412],[226,228,228,110,110,109,0.431],[226,228,228,110,110,109,0.431],[227,229,229,115,115,114,0.451],[228,230,230,120,120,119,0.471],[229,231,231,125,125,124,0.49],[229,231,231,125,125,124,0.49],[230,232,232,130,130,129,0.511],[232,234,234,141,141,140,0.553],[232,234,234,141,141,140,0.553],[232,234,234,141,141,140,0.553],[233,235,235,146,146,146,0.574],[234,236,236,152,152,151,0.596],[235,237,237,157,157,157,0.617],[235,237,237,157,157,157,0.617],[236,238,238,162,163,162,0.638],[237,239,239,168,168,168,0.66],[239,239,239,175,174,173,0.686],[241,241,241,185,184,183,0.725],[239,241,241,178,179,178,0.702],[240,242,242,184,184,184,0.723],[243,243,243,195,194,194,0.765],[243,243,243,195,194,194,0.765],[242,244,244,194,195,195,0.766],[244,244,244,200,199,199,0.784],[245,245,245,205,204,204,0.804],[246,246,246,210,209,209,0.824],[246,246,246,210,209,209,0.824],[248,248,248,220,219,219,0.863],[249,249,249,225,225,224,0.882],[249,249,249,225,225,224,0.882],[250,250,250,230,230,229,0.902],[250,250,250,230,230,229,0.902],[251,251,251,235,235,235,0.922],[251,251,251,235,235,235,0.922],[251,251,251,235,235,235,0.922],[252,252,252,240,240,240,0.941],[252,252,252,240,240,240,0.941],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[229,231,231,125,125,124,0.49],[204,208,210,0,0,0,-0.0],[44,203,254,41,200,251,0.984],[44,203,254,41,200,251,0.984],[44,203,254,41,200,251,0.984],[123,204,230,10,88,113,0.444],[204,208,210,0,0,0,-0.0],[170,208,221,5,47,60,0.236],[123,204,230,10,88,113,0.444],[78,204,244,30,155,196,0.767],[44,203,254,39,198,249,0.978]],"end":[[44,203,254,39,198,249,0.978],[60,206,255,60,206,255,1.0],[88,211,254,81,204,247,0.969],[125,217,255,125,217,255,1.0],[161,223,255,160,222,254,0.996],[192,231,254,187,226,249,0.978],[216,239,255,216,239,255,1.0],[237,247,254,232,242,249,0.978],[255,255,255,255,255,255,1.0],[251,251,251,235,235,235,0.922],[246,246,246,210,209,209,0.824],[239,241,241,178,179,178,0.702],[232,234,234,141,141,140,0.553],[225,227,227,105,105,103,0.412],[217,222,221,76,76,75,0.298],[211,216,215,43,43,43,0.17],[205,209,211,6,6,6,0.022],[204,208,210,0,0,0,-0.0],[207,212,211,22,22,21,0.085],[213,218,217,54,54,53,0.213],[222,224,224,90,89,88,0.353],[228,230,230,120,120,119,0.471],[235,237,237,157,157,157,0.617],[241,243,243,189,190,189,0.745],[249,249,249,225,225,224,0.882],[253,253,253,245,245,245,0.961],[253,253,253,245,245,245,0.961],[249,249,249,225,225,224,0.882],[241,243,243,189,190,189,0.745],[230,237,236,152,157,156,0.617],[221,230,231,112,119,119,0.468],[214,223,224,75,81,81,0.319],[208,217,218,45,49,49,0.191],[205,211,213,16,17,17,0.067],[204,208,210,0,0,0,-0.0],[203,209,211,4,6,5,0.022],[202,215,215,26,38,36,0.149],[198,220,218,44,65,63,0.255],[191,227,224,69,103,98,0.402],[180,233,230,85,136,132,0.532],[165,238,233,91,163,157,0.638],[145,245,238,102,201,193,0.787],[119,250,241,97,228,219,0.894],[96,253,243,87,244,234,0.957],[164,226,221,38,98,91,0.383],[204,208,210,0,0,0,-0.0],[227,225,167,115,111,52,0.451],[254,242,118,252,239,115,0.986],[232,227,156,140,133,61,0.549],[204,208,210,0,0,0,-0.0],[162,224,219,27,86,80,0.338],[97,253,243,88,244,234,0.957],[102,249,239,76,222,212,0.872],[112,245,238,67,199,192,0.781],[124,241,232,63,179,169,0.702],[136,236,229,54,152,144,0.596],[149,231,226,45,125,119,0.489],[160,223,221,21,81,78,0.319],[174,219,216,15,60,57,0.234],[185,214,213,8,33,31,0.128],[197,210,210,3,11,10,0.043],[204,208,210,0,0,0,-0.0]],"highlight":[[44,203,254,39,198,249,0.978],[189,231,253,180,222,244,0.956],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[251,253,253,242,244,244,0.957],[249,254,253,245,250,249,0.979],[247,254,253,243,250,249,0.979],[246,253,252,237,244,243,0.957],[243,253,254,238,248,249,0.978],[241,254,254,237,250,250,0.979],[238,253,253,229,244,244,0.957],[235,253,252,226,244,243,0.957],[232,254,252,228,250,248,0.979],[229,253,251,220,244,242,0.957],[224,253,252,215,244,243,0.957],[221,254,252,217,250,248,0.979],[215,254,250,211,250,245,0.979],[210,254,249,206,250,244,0.979],[207,252,249,194,239,235,0.936],[200,253,248,191,244,239,0.957],[196,253,249,187,244,240,0.957],[190,252,247,177,239,233,0.936],[182,253,246,173,244,237,0.957],[176,253,247,167,244,238,0.957],[171,253,246,162,244,237,0.957],[162,253,246,153,244,237,0.957],[154,252,244,141,239,230,0.936],[147,252,244,134,239,230,0.936],[141,253,245,132,244,236,0.957],[131,253,244,122,244,235,0.957],[126,252,245,112,237,230,0.93],[118,253,244,108,243,233,0.951],[111,253,245,102,244,236,0.957],[106,252,244,93,239,231,0.936],[100,253,244,92,245,236,0.96],[96,253,243,88,245,235,0.96],[93,250,242,72,228,220,0.896],[94,249,243,68,222,216,0.872],[92,247,243,57,212,207,0.83],[89,245,244,46,202,200,0.791],[87,243,244,37,192,193,0.756],[83,242,244,33,191,193,0.756],[81,239,247,45,202,210,0.822],[80,235,246,39,194,204,0.8],[77,235,247,40,197,209,0.82],[77,232,249,50,204,221,0.867],[73,230,249,46,202,221,0.867],[68,227,248,36,195,215,0.844],[65,224,250,42,201,227,0.889],[62,221,249,35,194,222,0.869],[59,217,250,36,194,227,0.889],[53,213,252,42,201,241,0.944],[50,210,252,34,194,235,0.922],[44,203,254,41,200,252,0.987]],"pulse":[[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,203,252,32,189,238,0.933],[46,203,252,32,189,238,0.933],[49,204,253,40,195,244,0.956],[49,204,253,40,195,244,0.956],[51,203,251,33,185,232,0.911],[51,203,251,33,185,232,0.911],[54,204,252,40,190,238,0.933],[55,203,252,41,189,238,0.933],[57,203,249,30,175,221,0.867],[61,204,249,34,176,221,0.867],[63,204,249,36,176,221,0.867],[66,204,248,34,172,215,0.844],[70,205,247,34,168,210,0.822],[72,204,245,27,158,198,0.778],[77,204,244,27,153,193,0.756],[81,204,243,27,149,187,0.733],[87,205,242,28,145,181,0.711],[91,204,240,23,135,170,0.667],[98,204,237,16,121,153,0.6],[104,205,237,22,122,153,0.6],[110,205,234,15,108,136,0.533],[117,205,233,17,103,130,0.511],[127,206,232,23,100,125,0.489],[133,206,231,24,95,119,0.467],[140,205,227,13,76,96,0.378],[145,207,225,9,68,85,0.333],[152,207,224,11,64,79,0.311],[159,207,222,10,55,68,0.267],[163,206,220,8,46,57,0.222],[167,207,219,7,41,51,0.2],[174,206,217,6,32,40,0.156],[176,207,216,5,28,35,0.138],[180,206,214,4,24,30,0.119],[183,206,213,4,21,26,0.104],[186,208,212,3,18,22,0.088],[187,207,212,3,17,21,0.083],[191,209,212,2,13,16,0.064],[193,208,212,2,11,14,0.054],[195,208,212,2,9,11,0.044],[197,207,210,1,7,9,0.034],[198,208,211,1,6,8,0.029],[199,208,209,1,5,6,0.025],[199,208,209,1,5,6,0.025],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[204,208,210,0,0,0,-0.0],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[201,207,209,0,0,0,0.015],[199,208,209,1,5,6,0.025],[199,208,209,1,5,6,0.025],[198,208,211,1,6,8,0.029],[197,207,210,1,7,9,0.034],[195,208,212,2,9,11,0.044],[193,208,212,2,11,14,0.054],[189,207,212,3,15,19,0.074],[187,207,212,3,17,21,0.083],[186,207,214,3,18,23,0.089],[183,206,215,4,22,28,0.111],[178,206,214,4,25,32,0.127],[175,206,215,5,28,36,0.142],[172,207,217,6,31,40,0.157],[167,207,219,7,40,51,0.2],[161,207,220,8,44,57,0.222],[155,206,222,9,53,68,0.267],[149,206,223,10,58,74,0.289],[144,205,226,13,71,91,0.356],[137,205,226,6,71,91,0.356],[131,206,230,18,90,113,0.444],[121,205,230,8,89,113,0.444],[115,205,233,15,103,130,0.511],[109,206,234,14,109,136,0.533],[101,205,236,15,117,147,0.578],[97,205,239,24,131,164,0.644],[89,204,240,21,135,170,0.667],[85,204,241,22,139,176,0.689],[81,204,245,36,158,198,0.778],[75,205,246,34,163,204,0.8],[72,204,245,27,158,198,0.778],[68,206,247,32,169,210,0.822],[66,204,248,34,172,215,0.844],[63,204,249,36,176,221,0.867],[61,204,251,43,186,232,0.911],[57,203,249,30,175,221,0.867],[55,203,252,41,189,238,0.933],[54,204,252,40,190,238,0.933],[51,203,251,33,185,232,0.911],[51,203,251,33,185,232,0.911],[49,204,253,40,195,244,0.956],[49,204,253,40,195,244,0.956],[46,203,252,32,189,238,0.933],[46,203,252,32,189,238,0.933],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[46,202,254,41,197,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978],[44,203,254,39,198,249,0.978]],"batWhite":[[204,208,210,0,0,0,-0.0],[205,209,211,6,6,6,0.022],[210,214,216,34,34,34,0.133],[216,221,220,71,70,70,0.277],[225,227,227,105,105,103,0.412],[233,235,235,146,146,146,0.574],[243,243,243,195,194,194,0.765],[249,249,249,225,225,224,0.882],[252,252,252,240,240,240,0.941],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[255,255,255,255,255,255,1.0],[251,251,251,235,235,235,0.922],[246,246,246,210,209,209,0.824],[241,241,241,185,184,183,0.725],[232,234,234,141,141,140,0.553],[226,228,228,110,110,109,0.431],[218,223,222,79,81,79,0.319],[212,217,216,47,49,47,0.191],[206,210,212,11,11,11,0.044],[204,208,210,0,0,0,-0.0]],"batOrange":[[204,208,210,0,0,0,-0.0],[206,206,201,11,6,0,0.043],[209,199,184,31,17,0,0.123],[217,190,158,65,36,0,0.255],[225,180,124,105,58,1,0.412],[233,166,93,145,76,2,0.569],[241,158,62,185,101,4,0.725],[249,149,36,225,125,11,0.882],[252,142,17,240,130,5,0.941],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[254,140,12,250,136,8,0.98],[250,144,23,230,124,2,0.902],[247,152,44,215,119,11,0.843],[240,161,70,182,101,9,0.712],[233,171,98,143,79,6,0.561],[227,178,121,113,62,4,0.443],[218,188,149,74,41,3,0.29],[213,196,173,45,25,2,0.176],[206,201,194,19,11,1,0.076],[204,208,210,0,0,0,-0.0]],"batRed":[[204,208,210,0,0,0,-0.0],[205,200,202,10,0,0,0.038],[209,181,181,35,0,0,0.138],[215,153,154,67,1,0,0.267],[224,122,122,105,1,0,0.419],[234,86,86,150,1,0,0.59],[242,53,53,191,1,0,0.748],[248,24,26,224,0,2,0.885],[252,6,6,247,0,0,0.973],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[254,0,0,254,0,0,1.0],[252,13,13,240,1,1,0.941],[245,35,36,211,0,1,0.832],[239,61,61,180,1,0,0.71],[232,89,91,145,0,1,0.572],[224,116,116,111,1,0,0.447],[218,144,146,77,0,1,0.308],[212,170,171,46,0,1,0.185],[206,194,194,19,0,0,0.075],[204,208,210,0,0,0,-0.0]],"crit":[[204,208,210,0,0,0,-0.0],[222,132,132,93,1,0,0.371],[243,39,38,206,1,0,0.819],[247,17,18,230,0,0,0.917],[224,107,107,121,1,0,0.49],[206,196,196,16,0,0,0.067],[216,159,159,62,0,1,0.243],[238,64,66,176,0,2,0.694],[254,0,2,254,0,2,1.0],[235,82,83,157,1,2,0.614],[210,173,173,45,0,1,0.176],[209,181,181,35,0,1,0.138],[233,90,92,147,1,3,0.575],[252,6,6,247,0,0,0.973],[241,56,55,187,2,0,0.738],[218,151,151,71,1,0,0.281],[205,200,202,10,0,0,0.038],[225,115,115,114,1,0,0.452],[248,24,26,224,0,2,0.885],[248,32,34,218,2,4,0.855],[223,125,124,103,2,0,0.41],[204,206,206,0,0,0,0.019],[219,141,142,81,1,0,0.324],[242,48,47,196,1,0,0.776],[250,11,11,239,0,0,0.948],[232,99,100,138,3,3,0.539],[208,189,189,26,1,1,0.1],[213,168,167,52,0,0,0.205],[236,74,75,163,0,0,0.644],[254,0,0,254,0,0,1.0],[252,8,10,244,0,2,0.962],[247,26,27,221,0,1,0.875],[242,47,46,198,1,0,0.781],[237,68,69,170,0,0,0.673],[231,91,92,142,0,0,0.562],[228,114,115,119,3,3,0.467],[220,137,139,85,0,1,0.341],[215,160,159,61,0,0,0.242],[210,180,180,36,0,0,0.143],[205,198,197,15,0,0,0.062],[204,208,210,0,0,0,-0.0]]};
+const F = 1000/24;
+DATA.end1 = DATA.end.slice(0,18).concat(DATA.end.slice(35));
+const P = {commit:1000, start:300, gap:50, buzzGap:40, falloff:300, save:500, fade:167};
+const B = P.commit - P.start - 3*F; // 575 ms build
+
+/* ---------- LED model ---------- */
+const mix=(a,b,t)=>a+(b-a)*t, mixE=(A,B,t)=>A.map((v,i)=>mix(v,B[i],t));
+const OFF=[0,0,0];
+function frameE(name,pos){ const fr=DATA[name], n=fr.length-1, p=Math.max(0,Math.min(n,pos)), i=Math.floor(p), j=Math.min(n,i+1), t=p-i; return [3,4,5].map(k=>mix(fr[i][k],fr[j][k],t)); }
+function mapPos(map,ms){ if(ms<=map[0][1]) return map[0][0]; for(let k=1;k<map.length;k++){ const [f0,t0]=map[k-1],[f1,t1]=map[k]; if(ms<=t1) return f0+(f1-f0)*((ms-t0)/((t1-t0)||1)); } return map.at(-1)[0]; }
+const SPEC = {
+  begin:    {name:"begin",     map:[[0,0],[61,B],[72,B+11*F]], fromN:0},
+  end:      {name:"end1",      map:[[0,0],[27,B],[44,B+17*F]], fromN:8},
+  endTail:  {name:"end1",      map:[[27,0],[44,17*F]], fromN:0},
+  highlight:{name:"highlight", map:[[0,0],[55,55*F]], fromN:2},
+  batWhite: {name:"batWhite",  map:[[0,0],[34,34*F]], fromN:0},
+  batOrange:{name:"batOrange", map:[[0,0],[34,34*F]], fromN:0},
+  batRed:   {name:"batRed",    map:[[0,0],[34,34*F]], fromN:0},
+  crit:     {name:"crit",      map:[[0,0],[40,40*F]], fromN:0},
+};
+const dur = type => SPEC[type].map.at(-1)[1] - SPEC[type].map[0][1];
+
+class TL{
+  constructor(){ this.ov=[]; this.base=[{t0:-1e9,mode:"off"}]; this.hap=[]; this.hw=[]; this.btn=[]; this.thr=[]; }
+  baseAt(t){ let b=this.base[0]; for(const e of this.base) if(e.t0<=t) b=e; return b.mode==="pulse" ? frameE("pulse", (((t-b.p0)/F)%112+112)%112) : OFF; }
+  ledAt(t){ for(let i=this.ov.length-1;i>=0;i--){ const o=this.ov[i]; if(t>=o.t0 && t<o.t1) return o.sample(t); } return this.baseAt(t); }
+  setBase(t0,mode){ this.base.push({t0,mode,p0:t0}); this.base.sort((a,b)=>a.t0-b.t0); }
+  overlay(type,t0){
+    const s=SPEC[type], from=this.ledAt(t0), d=dur(type);
+    this.ov.forEach(o=>o.t1=Math.min(o.t1,t0));
+    this.ov.push({t0,t1:t0+d,type,sample:t=>{ const pos=mapPos(s.map,t-t0+s.map[0][1]); if(s.fromN && pos<s.fromN) return mixE(from, frameE(s.name,s.fromN), pos/s.fromN); return frameE(s.name,pos); }});
+    return t0+d;
+  }
+  fade(t0){ const from=this.ledAt(t0), me=this; this.ov.forEach(o=>o.t1=Math.min(o.t1,t0)); this.ov.push({t0,t1:t0+P.fade,type:"fade",sample:t=>{ const p=(t-t0)/P.fade, e=p*p*(3-2*p); return mixE(from, me.baseAt(t), e); }}); }
+  /* haptics */
+  ramp(t0,t1,a0,a1){ const r={kind:"ramp",t0,t1,a0,a1,cut:Infinity}; this.hap.push(r); return r; }
+  pulse(t0,len,a){ this.hap.push({kind:"pulse",t0,t1:t0+len,a}); }
+  fall(t0,len,a){ this.hap.push({kind:"fall",t0,t1:t0+len,a}); }
+  hapAt(t){ let v=0; for(const s of this.hap){ if(t<s.t0||t>=s.t1) continue;
+    if(s.kind==="ramp"){ if(t>=s.cut) continue; const u=(t-s.t0)/(s.t1-s.t0); v=Math.max(v,s.a0+(s.a1-s.a0)*u*u); }
+    else if(s.kind==="fall"){ const u=(t-s.t0)/(s.t1-s.t0); v=Math.max(v,s.a*(0.5+0.5*Math.cos(Math.PI*u))); }
+    else v=Math.max(v,s.a); } return v; }
+  rampLevel(r,t){ const u=Math.max(0,Math.min(1,(t-r.t0)/(r.t1-r.t0))); return r.a0+(r.a1-r.a0)*u*u; }
+}
+
+/* ---------- interaction scripts (all times absolute ms) ---------- */
+const act = {
+  battery(T,press,rel,band){ T.btn.push([press,rel,"short"]); T.hw.push({t:press,label:"battery read"}); T.overlay(band,rel); },
+  crit(T,press,rel){ T.btn.push([press,rel,"any"]); T.hw.push({t:press,label:"below 2%: recording refused"}); T.overlay("crit",press); [2,7,12].forEach(f=>T.pulse(press+f*F,60,70)); },
+  start(T,press,rel){ T.btn.push([press,rel,"long"]); T.thr.push(press);
+    const end=T.overlay("begin",press+P.start); T.setBase(end,"pulse");
+    const r=T.ramp(press+P.start,press+P.commit-P.gap,15,65); r.cut=press+P.commit-P.gap;
+    T.pulse(press+P.commit,80,80); T.hw.push({t:press+P.commit,label:"audio capture start"}); },
+  startEarly(T,press,rel){ T.btn.push([press,rel,"early"]); T.thr.push(press);
+    T.overlay("begin",press+P.start); T.fade(rel);
+    const r=T.ramp(press+P.start,press+P.commit-P.gap,15,65); r.cut=rel; T.fall(rel,P.falloff,T.rampLevel(r,rel)); },
+  highlight(T,press,rel){ T.btn.push([press,rel,"short"]); const end=T.overlay("highlight",rel); T.setBase(end,"pulse"); T.hw.push({t:rel,label:"highlight marker"}); },
+  stop(T,press,rel){ T.btn.push([press,rel,"long"]); T.thr.push(press);
+    const end=T.overlay("end",press+P.start); T.setBase(end,"off");
+    const r=T.ramp(press+P.start,press+P.commit-P.gap,15,65); r.cut=press+P.commit-P.gap;
+    T.pulse(press+P.commit,80,80); T.pulse(press+P.commit+80+P.buzzGap,80,80);
+    T.hw.push({t:press+P.commit,label:"audio capture stop"}); T.hw.push({t:press+P.commit+P.save,label:"files saved (S)"}); },
+  stopEarly(T,press,rel){ T.btn.push([press,rel,"early"]); T.thr.push(press);
+    T.overlay("end",press+P.start); T.fade(rel);
+    const r=T.ramp(press+P.start,press+P.commit-P.gap,15,65); r.cut=rel; T.fall(rel,P.falloff,T.rampLevel(r,rel)); },
+  lowStop(T,t){ const end=T.overlay("endTail",t); T.setBase(end,"off"); T.pulse(t,80,80); T.pulse(t+80+P.buzzGap,80,80);
+    T.hw.push({t,label:"battery 1%: capture stop"}); T.hw.push({t:t+P.save,label:"files saved (S)"}); },
+};
+const MAIN = [["battery",0,150,"batWhite"],["start",2500,3700],["highlight",6500,6650],["stop",10500,11700]];
+function build(steps){ const T=new TL(); steps.forEach(([k,...a])=>act[k](T,...a)); return T; }
+const main = build(MAIN);
+const prefix = n => MAIN.slice(0,n);
+const BRANCHES = [
+  {col:0,row:0, title:"Battery 10-25%", note:"short press, orange", T:build([["battery",0,150,"batOrange"]]), w:[-100,1700], ref:0},
+  {col:0,row:1, title:"Battery 2-10%", note:"short press, red; recording still allowed", T:build([["battery",0,150,"batRed"]]), w:[-100,1700], ref:0},
+  {col:0,row:2, title:"Battery below 2%", note:"any press, on press-down; no recording", T:build([["crit",0,150]]), w:[-100,1900], ref:0},
+  {col:1,row:0, title:"Early release, start", note:"released at 650 ms", T:build([...prefix(1),["startEarly",2500,3150]]), w:[2400,3900], ref:2500},
+  {col:2,row:0, title:"Early release, stop", note:"released at 650 ms; recording continues", T:build([...prefix(3),["stopEarly",10500,11150]]), w:[10400,11900], ref:10500},
+  {col:2,row:1, title:"Battery reaches 1% while recording", note:"device ends and saves on its own", T:null, w:[10400,11900], ref:10500},
+];
+BRANCHES[5].T = (()=>{ const T=build(prefix(3)); act.lowStop(T,10500); return T; })();
+const PHASES = [[150,1567,"Battery check"],[2500,3833,"Start recording"],[3833,6650,"Recording"],[6650,8942,"Highlight"],[8942,10500,"Recording"],[10500,12083,"End recording"]];
+
+/* ---------- drawing ---------- */
+const cv=document.getElementById("cv"), cx=cv.getContext("2d"), tip=document.getElementById("tip");
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let S=0.16; const L=118, T0=-100, T1=12700;
+const X=t=>L+(t-T0)*S;
+const MAIN_LANES={phase:[16,18], btn:[56,26], led:[100,34], hap:[156,100], hw:[272,40], axis:[326]};
+const MAIN_H=350, ROW_H=204, ROW_GAP=24, BR_TOP=MAIN_H+36;
+const BR_LANES={title:[0], btn:[30,16], led:[62,22], hap:[92,56], hw:[158,14], axis:[188]};
+let regions=[];
+
+function hex(e){ return "#"+e.map(v=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,"0")).join(""); }
+function draw(){
+  const dpr=devicePixelRatio||1, W=Math.ceil(X(T1)+40), H=BR_TOP+3*(ROW_H+ROW_GAP)+10;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+"px"; cv.style.height=H+"px";
+  cx.setTransform(dpr,0,0,dpr,0,0); cx.clearRect(0,0,W,H);
+  const C={fg:css("--fg"),mute:css("--mute"),dim:css("--dim"),line:css("--line"),acc:css("--accent"),hw:css("--hw"),rel:css("--rel"),mono:css("--mono"),sans:css("--sans")};
+  regions=[];
+  cx.textBaseline="middle";
+
+  /* main graph */
+  const ML=MAIN_LANES;
+  cx.font=`12px ${C.sans}`; cx.fillStyle=C.mute;
+  [["Button","btn"],["LED","led"],["Haptic","hap"],["Hardware","hw"]].forEach(([l,k])=>cx.fillText(l,16,ML[k][0]+ML[k][1]/2));
+  cx.font=`10px ${C.mono}`; cx.fillStyle=C.dim; cx.textAlign="right"; cx.fillText("100%",L-8,ML.hap[0]+4); cx.fillText("50%",L-8,ML.hap[0]+ML.hap[1]/2); cx.fillText("0",L-8,ML.hap[0]+ML.hap[1]-3); cx.textAlign="left";
+  // phases
+  PHASES.forEach(([a,b,l],i)=>{ cx.fillStyle=i%2?"#15141a":"#1b1a21"; cx.fillRect(X(a),ML.phase[0],X(b)-X(a),ML.phase[1]); cx.fillStyle=C.fg; cx.font=`500 11px ${C.sans}`; cx.fillText(l,X(a)+6,ML.phase[0]+ML.phase[1]/2); });
+  lanes(main,{btn:ML.btn,led:ML.led,hap:ML.hap,hw:ML.hw,axis:ML.axis[0],x0:T0,x1:T1,ref:null,main:true},C);
+
+  /* branches */
+  const colX = {0:[], 1:[], 2:[]};
+  BRANCHES.forEach(b=>{
+    const y0=BR_TOP+b.row*(ROW_H+ROW_GAP), BL={btn:[y0+BR_LANES.btn[0],BR_LANES.btn[1]], led:[y0+BR_LANES.led[0],BR_LANES.led[1]], hap:[y0+BR_LANES.hap[0],BR_LANES.hap[1]], hw:[y0+BR_LANES.hw[0]-8,BR_LANES.hw[1]]};
+    // panel
+    cx.fillStyle="#0a090c"; roundRect(X(b.w[0])-8,y0-6,X(b.w[1])-X(b.w[0])+16,ROW_H-4,10); cx.fill(); cx.strokeStyle=C.line; cx.stroke();
+    cx.font=`500 12px ${C.sans}`; cx.fillStyle=C.fg; cx.fillText(b.title,X(b.w[0]),y0+8);
+    const tw=cx.measureText(b.title).width; cx.font=`11px ${C.sans}`; cx.fillStyle=C.mute; cx.fillText(b.note,X(b.w[0])+tw+10,y0+8);
+    lanes(b.T,{btn:BL.btn,led:BL.led,hap:BL.hap,hw:BL.hw,axis:y0+BR_LANES.axis[0],x0:b.w[0],x1:b.w[1],ref:b.ref,main:false},C);
+    colX[b.col].push({x:X(b.ref),y:BL.btn[0]+BL.btn[1]/2});
+  });
+  // connectors from the main graph
+  Object.values(colX).forEach(pts=>{ if(!pts.length) return; const x=pts[0].x, yTop=ML.axis[0]+10, yBot=pts.at(-1).y;
+    cx.strokeStyle=C.mute; cx.setLineDash([3,4]); cx.beginPath(); cx.moveTo(x,MAIN_LANES.btn[0]); cx.lineTo(x,yBot); cx.stroke(); cx.setLineDash([]);
+    pts.forEach(p=>{ cx.fillStyle=C.mute; cx.beginPath(); cx.arc(p.x,p.y,3,0,7); cx.fill(); });
+    cx.fillStyle=C.fg; cx.beginPath(); cx.arc(x,MAIN_LANES.btn[0]+MAIN_LANES.btn[1]/2,3.5,0,7); cx.fill();
+  });
+}
+function roundRect(x,y,w,h,r){ cx.beginPath(); cx.moveTo(x+r,y); cx.arcTo(x+w,y,x+w,y+h,r); cx.arcTo(x+w,y+h,x,y+h,r); cx.arcTo(x,y+h,x,y,r); cx.arcTo(x,y,x+w,y,r); cx.closePath(); }
+
+function lanes(T,o,C){
+  const a=X(o.x0), b=X(o.x1), step=1/S, refT=o.ref??0;
+  // thresholds
+  T.thr.forEach(p=>[300,1000].forEach(d=>{ const t=p+d; if(t<o.x0||t>o.x1) return; const x=X(t);
+    cx.strokeStyle=C.dim; cx.setLineDash([2,3]); cx.beginPath(); cx.moveTo(x,o.btn[0]-6); cx.lineTo(x,o.hap[0]+o.hap[1]); cx.stroke(); cx.setLineDash([]);
+    cx.font=`10px ${C.mono}`; cx.fillStyle=C.mute; cx.fillText(`+${d}`,x+3,o.btn[0]-6); }));
+  // button
+  cx.strokeStyle=C.line; cx.beginPath(); cx.moveTo(a,o.btn[0]+o.btn[1]); cx.lineTo(b,o.btn[0]+o.btn[1]); cx.stroke();
+  T.btn.forEach(([p,r,kind])=>{ if(r<o.x0||p>o.x1) return; const x0=X(Math.max(p,o.x0)), x1=X(Math.min(r,o.x1)), top=o.btn[0]+3, bot=o.btn[0]+o.btn[1];
+    cx.font=`10px ${C.mono}`;
+    if(kind==="short"){ // release window: any time up to 300 ms
+      const xw=X(p+300); cx.fillStyle=C.rel+"22"; cx.fillRect(x0,top,xw-x0,bot-top);
+      cx.strokeStyle=C.rel+"88"; cx.setLineDash([3,3]); cx.beginPath(); cx.moveTo(xw,top); cx.lineTo(xw,bot); cx.stroke(); cx.setLineDash([]);
+    }
+    cx.strokeStyle=C.fg; cx.lineWidth=2; cx.beginPath(); cx.moveTo(x0,bot); cx.lineTo(x0,top); cx.lineTo(x1,top);
+    if(kind==="any"){ cx.stroke(); cx.setLineDash([3,3]); cx.beginPath(); cx.moveTo(x1,top); cx.lineTo(X(p+900),top); cx.stroke(); cx.setLineDash([]); }
+    else { cx.lineTo(x1,bot); cx.stroke(); }
+    cx.lineWidth=1;
+    const mark=(x,txt)=>{ cx.fillStyle=C.fg; cx.beginPath(); cx.moveTo(x-4,o.led[0]-7); cx.lineTo(x+4,o.led[0]-7); cx.lineTo(x,o.led[0]-1); cx.closePath(); cx.fill(); cx.fillStyle=C.fg; cx.fillText(txt,x+7,o.led[0]-5); };
+    if(kind==="any"){ cx.fillStyle=C.mute; cx.fillText("any press length",X(p+900)+4,top+4); mark(x0,"plays on press-down"); return; }
+    if(r>o.x1) return;
+    cx.strokeStyle=C.rel; cx.lineWidth=1.5; cx.beginPath(); cx.moveTo(x1,o.btn[0]-2); cx.lineTo(x1,o.hap[0]+o.hap[1]); cx.stroke(); cx.lineWidth=1;
+    cx.fillStyle=C.rel;
+    const lbl = kind==="short" ? (o.main?"release: any time up to 300 ms":"release ≤300") : kind==="long" ? "release: any time after +1000" : (o.main?`release at ${Math.round(r-p)} (between 300 and 1000)`:`release at ${Math.round(r-p)} (300-1000)`);
+    const xl = kind==="short" ? X(p+300)+4 : x1+4; cx.fillText(lbl,xl,bot-6);
+    if(kind==="short") mark(x1,"starts on release");
+  });
+  // LED strip
+  cx.fillStyle="#000"; cx.fillRect(a,o.led[0],b-a,o.led[1]);
+  for(let x=Math.floor(a);x<b;x++){ const t=(x-L)/S+T0; const e=T.ledAt(t); if(e[0]+e[1]+e[2]<1) continue; cx.fillStyle=`rgb(${e[0]|0},${e[1]|0},${e[2]|0})`; cx.fillRect(x,o.led[0],1.2,o.led[1]); }
+  cx.strokeStyle=C.line; cx.strokeRect(a+.5,o.led[0]+.5,b-a-1,o.led[1]-1);
+  // haptic
+  const hy=o.hap[0], hh=o.hap[1], Y=v=>hy+hh-v/100*hh;
+  [0,50,100].forEach(v=>{ cx.strokeStyle=C.line; if(v) cx.setLineDash([2,4]); cx.beginPath(); cx.moveTo(a,Y(v)); cx.lineTo(b,Y(v)); cx.stroke(); cx.setLineDash([]); });
+  cx.beginPath(); cx.moveTo(a,Y(0)); for(let x=a;x<=b;x+=0.5){ cx.lineTo(x,Y(T.hapAt((x-L)/S+T0))); } cx.lineTo(b,Y(0)); cx.closePath(); cx.fillStyle=C.acc+"30"; cx.fill();
+  cx.beginPath(); let first=true; for(let x=a;x<=b;x+=0.5){ const y=Y(T.hapAt((x-L)/S+T0)); if(first){cx.moveTo(x,y);first=false;} else cx.lineTo(x,y); } cx.strokeStyle=C.acc; cx.lineWidth=1.5; cx.stroke(); cx.lineWidth=1;
+  // haptic labels
+  cx.font=`10px ${C.mono}`; cx.fillStyle=C.acc;
+  let lastLabelX=-1e9;
+  T.hap.forEach(s=>{ if(s.t0<o.x0||s.t0>o.x1) return;
+    if(s.kind==="pulse"){ const x=X(s.t0); if(x<lastLabelX) return; const txt=`${s.a}% ${Math.round(s.t1-s.t0)}ms`; cx.fillText(txt,x,Y(s.a)-8); lastLabelX=x+cx.measureText(txt).width+6; }
+    if(s.kind==="ramp" && o.main){ cx.fillText(`${s.a0}→${s.a1}%`,X(s.t0)+4,Y(s.a0)-10); }
+    if(s.kind==="fall"){ cx.fillText(`falloff ${Math.round(s.t1-s.t0)}ms`,X(s.t0)+4,Y(s.a)-10); } });
+  // hardware
+  const hw=T.hw.filter(e=>e.t>=o.x0&&e.t<=o.x1);
+  let lx=-1e9, row=0;
+  hw.forEach(e=>{ const x=X(e.t);
+    cx.strokeStyle=C.hw; cx.globalAlpha=.5; cx.setLineDash([2,3]); cx.beginPath(); cx.moveTo(x,o.led[0]); cx.lineTo(x,o.hw?o.hw[0]+8:o.hap[0]+o.hap[1]); cx.stroke(); cx.setLineDash([]); cx.globalAlpha=1;
+    const y=o.hw ? o.hw[0]+8 : o.hap[0]+o.hap[1]+2;
+    cx.font=`11px ${C.sans}`; const rel=o.ref==null?"":` +${Math.round(e.t-refT)}`, txt=e.label+rel;
+    row = x<lx ? row+1 : 0; lx=x+cx.measureText(txt).width+14;
+    const yy=y+row*15; cx.fillStyle=C.hw; cx.beginPath(); cx.arc(x,yy,3,0,7); cx.fill(); cx.fillText(txt,x+6,yy);
+  });
+  // axis
+  cx.font=`10px ${C.mono}`; cx.fillStyle=C.dim; cx.textAlign="center";
+  const st = o.main ? 500 : 250; const base = o.main ? 0 : refT;
+  for(let t=Math.ceil((o.x0-base)/st)*st+base; t<=o.x1; t+=st){ const x=X(t); cx.fillRect(x,o.axis-8,1,4); cx.fillText(o.main?`${t}`:`${t-base}`,x,o.axis); }
+  cx.textAlign="left";
+  regions.push({a,b,y0:o.btn[0]-10,y1:o.axis,T,ref:o.ref,main:o.main});
+}
+
+/* hover */
+cv.addEventListener("mousemove",e=>{
+  const r=cv.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+  const g=regions.find(g=>x>=g.a&&x<=g.b&&y>=g.y0&&y<=g.y1);
+  if(!g){ tip.hidden=true; return; }
+  const t=(x-L)/S+T0, led=g.T.ledAt(t), h=g.T.hapAt(t), lvl=Math.round(Math.max(...led)/2.55);
+  const tt = g.main ? `${Math.round(t)} ms` : `+${Math.round(t-g.ref)} ms`;
+  tip.innerHTML=`${tt} · <span class="sw" style="background:${hex(led)}"></span>${hex(led)} (${lvl}%) · haptic ${Math.round(h)}%`;
+  tip.hidden=false; tip.style.left=Math.min(e.clientX+14,innerWidth-280)+"px"; tip.style.top=(e.clientY+14)+"px";
+});
+cv.addEventListener("mouseleave",()=>tip.hidden=true);
+document.querySelectorAll("[data-z]").forEach(btn=>btn.onclick=()=>{ S=+btn.dataset.z; document.querySelectorAll("[data-z]").forEach(b=>b.setAttribute("aria-pressed",b===btn)); draw(); });
+draw();
+</script>
+
+</body>
+</html>

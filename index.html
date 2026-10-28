@@ -18,9 +18,9 @@
   --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   color-scheme:dark;
 }
-html,body{background:var(--bg);color:var(--fg)}
-*,*::before,*::after{box-sizing:border-box}
-body{margin:0;font-family:var(--display);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 56px}
+html,*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg)}
+body{font-family:var(--display);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 56px}
 .wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px}
 header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 h1{font-weight:300;font-size:18px;margin:0}
@@ -114,6 +114,8 @@ button[aria-pressed="true"]{border-color:var(--accent);color:var(--hot)}
 </head>
 <body>
 <div class="wrap">
+<nav style="display:flex;gap:14px;font:12px ui-monospace,Menlo,monospace;color:#8b8492"><a href="./" style="color:#f2a65a">simulator</a><a href="timeline.html" style="color:#8b8492">timeline</a></nav>
+
   <header>
     <h1>Dot Note timing simulator</h1>
     <div class="hint">hold <kbd>space</kbd> or the device button · <kbd>P</kbd> pauses the scope</div>
