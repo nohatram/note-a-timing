@@ -366,7 +366,7 @@ function down(t){
   $("device").classList.add("down");
   if(mode==="start" && S.bat==="crit"){ // too low to record: plays on press-down, any press length
     pr.crit=true; hwEvent(t,"battery read · critical"); setOverlay(makeAnim("crit",t,S.cur,null));
-    if(S.haptics) [[80,80],[497,55],[955,30]].forEach(([d,a])=>hapPulse(t+d,90,a)); return;
+    if(S.haptics) [[80,80],[288,80],[497,80]].forEach(([d,a])=>hapPulse(t+d,90,a)); return;
   }
   schedule(t+P.shortMax, at=>{ // long press recognized: haptic build
     if(S.haptics){ const end=t+P.commit-P.gap; if(end>at){ pr.ramp = hapRamp(at,end,15,65); pr.ramp.press=true; } }
@@ -608,7 +608,7 @@ function renderSheet(){
     <li>release + ${at(0)}–${at(9*F)} fade in · hold to ${at(25*F)} · fade out to ${at(34*F)} · no haptic</li></ul></div>
   <div class="anim"><div class="t">Critical battery <span>any press in standby below 2% · AE 40f / ${ms(40*F)}</span></div><ul>
     <li class="hwk">${at(0)} on press-down: battery read, recording refused, no haptic ramp</li>
-    <li>${at(80)} ${at(497)} ${at(955)} three buzzes, 90 ms each, descending 80% / 55% / 30%, centered on the 1st, 3rd and 5th red peaks (about 417-458 ms apart)</li>
+    <li>${at(80)} ${at(288)} ${at(497)} three buzzes, 90 ms each at 80%, centered on the first three red peaks (about 208 ms apart)</li>
     <li>${at(0)}–${at(29*F)} five fast red blinks (~${ms(5*F)} period), peaks at ${at(3*F)} ${at(8*F)} ${at(13*F)} ${at(18.5*F)} ${at(24*F)}</li>
     <li>${at(29*F)} final red peak, fades to off by ${at(40*F)} · release length ignored</li></ul></div>
   <div class="anim"><div class="t">Early release <span>${P.shortMax} &lt; hold &lt; ${P.commit}</span></div><ul>
